@@ -1,0 +1,34 @@
+{
+  "name": "anyway2codex",
+  "version": "0.1.0",
+  "description": "Universal Codex model proxy",
+  "type": "module",
+  "bin": {
+    "anyway2codex": "dist/cli.js"
+  },
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc -p . && node postbuild.cjs",
+    "start": "node dist/cli.js --port 8799 --verbose",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "postbuild": "node postbuild.cjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.9.0",
+    "eventsource-parser": "^3.0.0",
+    "nanoid": "^5.0.7",
+    "undici": "^6.19.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^20.11.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.4.0"
+  },
+  "license": "MIT"
+}

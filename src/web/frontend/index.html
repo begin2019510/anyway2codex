@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>anyway2codex - 模型代理管理面板</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0f; color: #e0e0e0; min-height: 100vh; }
+    
+    /* Sidebar */
+    .sidebar { position: fixed; left: 0; top: 0; bottom: 0; width: 220px; background: #0f0f18; border-right: 1px solid #1a1a2e; padding: 20px 0; z-index: 100; }
+    .sidebar .logo { padding: 0 20px 24px; border-bottom: 1px solid #1a1a2e; }
+    .sidebar .logo h1 { font-size: 18px; color: #4fc3f7; font-weight: 700; }
+    .sidebar .logo p { font-size: 11px; color: #666; margin-top: 4px; }
+    .sidebar nav { padding: 16px 0; }
+    .sidebar nav a { display: flex; align-items: center; gap: 10px; padding: 10px 20px; color: #888; text-decoration: none; font-size: 14px; transition: all 0.2s; }
+    .sidebar nav a:hover { color: #e0e0e0; background: #1a1a2e; }
+    .sidebar nav a.active { color: #4fc3f7; background: rgba(79,195,247,0.1); border-right: 3px solid #4fc3f7; }
+    .sidebar nav a .icon { width: 20px; text-align: center; font-size: 16px; }
+    .sidebar .version { position: absolute; bottom: 20px; left: 20px; font-size: 11px; color: #444; }
+    
+    /* Main content */
+    .main { margin-left: 220px; padding: 24px 32px; }
+    .page { display: none; }
+    .page.active { display: block; }
+    
+    /* Header */
+    .page-header { margin-bottom: 24px; }
+    .page-header h2 { font-size: 22px; font-weight: 600; color: #fff; }
+    .page-header p { color: #666; font-size: 13px; margin-top: 4px; }
+    
+    /* Cards */
+    .card { background: #12121c; border: 1px solid #1a1a2e; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+    .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .card-header h3 { font-size: 15px; font-weight: 600; color: #ccc; }
+    
+    /* Stats grid */
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .stat-card { background: #12121c; border: 1px solid #1a1a2e; border-radius: 12px; padding: 20px; }
+    .stat-card .label { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+    .stat-card .value { font-size: 28px; font-weight: 700; color: #4fc3f7; margin-top: 4px; }
+    .stat-card .sub { font-size: 11px; color: #555; margin-top: 2px; }
+    .stat-card.green .value { color: #4caf50; }
+    .stat-card.orange .value { color: #ff9800; }
+    .stat-card.red .value { color: #f44336; }
+    
+    /* Mode switcher */
+    .mode-card { background: linear-gradient(135deg, #12121c 0%, #1a1a2e 100%); border: 1px solid #2a2a4a; border-radius: 16px; padding: 32px; margin-bottom: 24px; }
+    .mode-current { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+    .mode-badge { padding: 6px 16px; border-radius: 20px; font-size: 13px; font-weight: 600; }
+    .mode-badge.domestic { background: rgba(79,195,247,0.15); color: #4fc3f7; border: 1px solid rgba(79,195,247,0.3); }
+    .mode-badge.openai { background: rgba(76,175,80,0.15); color: #4caf50; border: 1px solid rgba(76,175,80,0.3); }
+    .mode-actions { display: flex; gap: 12px; }
+    
+    /* Buttons */
+    .btn { padding: 10px 20px; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+    .btn-primary { background: #4fc3f7; color: #000; }
+    .btn-primary:hover { background: #81d4fa; transform: translateY(-1px); }
+    .btn-secondary { background: #1a1a2e; color: #e0e0e0; border: 1px solid #333; }
+    .btn-secondary:hover { background: #2a2a4a; }
+    .btn-danger { background: rgba(244,67,54,0.15); color: #f44336; border: 1px solid rgba(244,67,54,0.3); }
+    .btn-danger:hover { background: rgba(244,67,54,0.25); }
+    .btn-success { background: rgba(76,175,80,0.15); color: #4caf50; border: 1px solid rgba(76,175,80,0.3); }
+    .btn-success:hover { background: rgba(76,175,80,0.25); }
+    .btn-sm { padding: 6px 12px; font-size: 12px; }
+    
+    /* Provider grid */
+    .provider-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+    .provider-card { background: #12121c; border: 1px solid #1a1a2e; border-radius: 12px; padding: 20px; transition: all 0.2s; }
+    .provider-card:hover { border-color: #333; transform: translateY(-2px); }
+    .provider-card .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .provider-card .name { font-size: 16px; font-weight: 600; color: #fff; }
+    .provider-card .shortcut { font-size: 11px; color: #666; background: #1a1a2e; padding: 2px 8px; border-radius: 4px; }
+    .provider-card .default { font-size: 12px; color: #4fc3f7; margin-bottom: 12px; }
+    .model-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+    .model-tag { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 6px; font-size: 11px; background: #1a1a2e; color: #888; border: 1px solid transparent; transition: all 0.2s; }
+    .model-tag:hover { border-color: #333; color: #ccc; }
+    .model-tag.vision { background: rgba(76,175,80,0.1); color: #4caf50; border-color: rgba(76,175,80,0.2); }
+    .model-tag.deprecated { opacity: 0.4; text-decoration: line-through; }
+    .model-tag .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    
+    /* Table */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; padding: 12px 16px; font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #1a1a2e; }
+    td { padding: 12px 16px; font-size: 13px; border-bottom: 1px solid #111; }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+    .status-dot.green { background: #4caf50; }
+    .status-dot.red { background: #f44336; }
+    .status-dot.yellow { background: #ff9800; }
+    
+    /* Key inputs */
+    .key-grid { display: grid; gap: 12px; }
+    .key-row { display: flex; align-items: center; gap: 12px; }
+    .key-row label { width: 120px; font-size: 13px; color: #888; flex-shrink: 0; }
+    .key-row input { flex: 1; padding: 10px 14px; background: #0a0a0f; border: 1px solid #222; border-radius: 8px; color: #e0e0e0; font-size: 13px; font-family: monospace; }
+    .key-row input:focus { outline: none; border-color: #4fc3f7; }
+    .key-row .saved { font-size: 11px; color: #4caf50; opacity: 0; transition: opacity 0.3s; }
+    .key-row .saved.show { opacity: 1; }
+    
+    /* Toast */
+    .toast { position: fixed; bottom: 24px; right: 24px; background: #1a1a2e; color: #4caf50; padding: 12px 20px; border-radius: 10px; font-size: 13px; border: 1px solid rgba(76,175,80,0.3); z-index: 1000; animation: slideIn 0.3s ease; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+    @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    
+    /* Log entries */
+    .log-list { max-height: 500px; overflow-y: auto; }
+    .log-entry { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #111; font-size: 13px; }
+    .log-entry .time { color: #555; font-family: monospace; font-size: 12px; width: 80px; flex-shrink: 0; }
+    .log-entry .status { width: 36px; text-align: center; font-family: monospace; font-size: 12px; font-weight: 600; padding: 2px 6px; border-radius: 4px; }
+    .log-entry .status.ok { background: rgba(76,175,80,0.15); color: #4caf50; }
+    .log-entry .status.err { background: rgba(244,67,54,0.15); color: #f44336; }
+    .log-entry .provider { color: #4fc3f7; width: 80px; flex-shrink: 0; }
+    .log-entry .model { color: #aaa; flex: 1; }
+    .log-entry .duration { color: #666; font-family: monospace; font-size: 12px; width: 60px; text-align: right; }
+    
+    /* Backup list */
+    .backup-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #111; }
+    .backup-item .info { font-size: 13px; }
+    .backup-item .time { color: #666; font-size: 12px; }
+    .backup-item .actions { display: flex; gap: 8px; }
+    
+    /* Empty state */
+    .empty { text-align: center; padding: 48px; color: #444; }
+    .empty .icon { font-size: 48px; margin-bottom: 12px; }
+    
+    /* Select */
+    select { padding: 8px 12px; background: #0a0a0f; border: 1px solid #222; border-radius: 8px; color: #e0e0e0; font-size: 13px; }
+    select:focus { outline: none; border-color: #4fc3f7; }
+    
+    /* Input */
+    input[type="text"], input[type="password"] { padding: 8px 12px; background: #0a0a0f; border: 1px solid #222; border-radius: 8px; color: #e0e0e0; font-size: 13px; }
+    input:focus { outline: none; border-color: #4fc3f7; }
+  
+    .log-expandable { cursor: pointer; }
+    .log-expandable:hover { background: #1a1a2e; }
+    .log-main { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .log-detail { display: none; padding: 12px 0 0; border-top: 1px solid #1a1a2e; margin-top: 8px; }
+    .log-expandable.expanded .log-detail { display: block; }
+    .log-conversation { font-size: 13px; }
+    .log-role { font-weight: 600; margin-right: 8px; }
+    .log-user, .log-assistant { margin-bottom: 8px; }
+    .log-user pre, .log-assistant pre { 
+      margin: 4px 0 0; padding: 8px 12px; border-radius: 6px; 
+      font-family: inherit; font-size: 13px; line-height: 1.5;
+      white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto;
+    }
+    .log-user pre { background: #1a2332; border: 1px solid #2a3a4a; }
+    .log-assistant pre { background: #1a2a1a; border: 1px solid #2a4a2a; }
+    .tokens { color: #888; font-size: 12px; }
+    .stream-badge { color: #4fc3f7; font-size: 11px; }
+
+
+    .log-error pre { background: #2a1a1a; border: 1px solid #4a2a2a; }
+    .log-raw { margin-top: 8px; }
+    .log-section { margin-bottom: 8px; }
+    .log-section strong { color: #888; font-size: 12px; display: block; margin-bottom: 4px; }
+    .raw-body {
+      background: #111118; border: 1px solid #222; border-radius: 6px;
+      padding: 8px 12px; font-size: 11px; line-height: 1.4; max-height: 300px;
+      overflow-y: auto; white-space: pre-wrap; word-break: break-all;
+      font-family: 'SF Mono', Monaco, Consolas, monospace;
+    }
+
+    .conv-messages { display: flex; flex-direction: column; gap: 8px; }
+    .conv-msg { border: 1px solid #1a1a2e; border-radius: 8px; padding: 10px 14px; font-size: 13px; margin-bottom: 0; }
+    .conv-msg.role-user { border-color: #2a3a5a; background: rgba(79,195,247,0.04); }
+    .conv-msg.role-assistant { border-color: #2a4a2a; background: rgba(76,175,80,0.04); }
+    .conv-msg.role-system { border-color: #4a4a2a; background: rgba(255,152,0,0.04); }
+    .conv-msg.role-tool { border-color: #4a2a4a; background: rgba(156,39,176,0.04); }
+    .conv-role { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12px; margin-bottom: 6px; }
+    .conv-role.user { color: #4fc3f7; }
+    .conv-role.assistant { color: #4caf50; }
+    .conv-role.system { color: #ff9800; }
+    .conv-role.tool { color: #ce93d8; }
+    .conv-content { white-space: pre-wrap; word-break: break-word; line-height: 1.6; color: #ccc; }
+    .conv-thinking { background: #111118; border: 1px solid #222; border-radius: 6px; padding: 8px 12px; margin-top: 6px; font-size: 12px; color: #888; max-height: 150px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
+    .conv-thinking-label { font-size: 11px; color: #666; margin-bottom: 4px; }
+    .conv-tools { margin-top: 6px; }
+    .conv-tool { background: #111118; border: 1px solid #2a2a4a; border-radius: 6px; padding: 8px 12px; margin-top: 4px; font-size: 12px; }
+    .conv-tool-name { color: #ce93d8; font-weight: 600; font-family: monospace; }
+    .conv-tool-args { color: #888; font-family: monospace; white-space: pre-wrap; word-break: break-all; max-height: 100px; overflow-y: auto; margin-top: 4px; }
+    .conv-tool-result { color: #4caf50; font-family: monospace; white-space: pre-wrap; word-break: break-all; max-height: 100px; overflow-y: auto; margin-top: 4px; border-top: 1px solid #222; padding-top: 4px; }
+    .conv-response-summary { display: flex; flex-wrap: wrap; gap: 12px; padding: 8px 12px; background: #111118; border-radius: 6px; margin-top: 8px; font-size: 12px; color: #666; }
+    .conv-response-summary span { color: #888; }
+    .conv-response-summary code { color: #4fc3f7; }
+    .conv-raw-toggle { font-size: 11px; color: #555; cursor: pointer; margin-top: 8px; text-decoration: underline; }
+    .conv-raw-toggle:hover { color: #888; }
+      .conv-sidebar { display: flex; gap: 0; height: calc(100vh - 120px); }
+    .conv-list-panel { width: 340px; min-width: 340px; border-right: 1px solid #1a1a2e; overflow-y: auto; background: #0d0d14; border-radius: 12px 0 0 12px; }
+    .conv-detail-panel { flex: 1; overflow-y: auto; background: #0f0f18; border-radius: 0 12px 12px 0; padding: 0; }
+    .conv-item { padding: 14px 16px; border-bottom: 1px solid #1a1a2e; cursor: pointer; transition: background 0.15s; }
+    .conv-item:hover { background: #1a1a2e; }
+    .conv-item.active { background: rgba(79,195,247,0.08); border-left: 3px solid #4fc3f7; }
+    .conv-item .conv-title { font-size: 13px; color: #e0e0e0; font-weight: 500; }
+    .conv-item .conv-meta { display: flex; gap: 8px; margin-top: 4px; font-size: 11px; color: #555; }
+    .conv-item .conv-meta .provider { color: #4fc3f7; }
+    .conv-item .conv-meta .count { color: #4caf50; }
+    .conv-item .conv-meta .time { color: #666; margin-left: auto; }
+    .conv-item .conv-msg-preview { font-size: 12px; color: #666; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .conv-detail-header { padding: 20px 24px; border-bottom: 1px solid #1a1a2e; background: #0f0f18; position: sticky; top: 0; z-index: 10; }
+    .conv-detail-header h3 { font-size: 14px; color: #e0e0e0; margin-bottom: 4px; }
+    .conv-detail-header .conv-info { font-size: 12px; display: flex; gap: 16px; }
+    .conv-detail-header .conv-info span { color: #888; }
+    .conv-log-entry { border-bottom: 1px solid #111; }
+    .conv-log-entry .conv-log-header { display: flex; align-items: center; gap: 10px; padding: 12px 20px; cursor: pointer; }
+    .conv-log-entry .conv-log-header:hover { background: rgba(255,255,255,0.02); }
+    .conv-log-entry .turn-num { font-size: 11px; color: #555; min-width: 24px; text-align: right; }
+    .conv-log-entry .turn-status { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .conv-log-entry .turn-status.ok { background: #4caf50; }
+    .conv-log-entry .turn-status.err { background: #f44336; }
+    .conv-log-entry .turn-msg { font-size: 13px; color: #ccc; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .conv-log-entry .turn-meta { font-size: 11px; color: #555; white-space: nowrap; }
+    .conv-log-entry .turn-meta code { color: #4fc3f7; }
+    .conv-log-detail { display: none; padding: 0 20px 16px 20px; }
+    .conv-log-entry.expanded .conv-log-detail { display: block; }
+    .conv-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: #444; font-size: 14px; }
+
+  </style>
+</head>
+<body>
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="logo">
+      <h1>⚡ anyway2codex</h1>
+      <p>Universal Model Proxy</p>
+    </div>
+    <nav>
+      <a href="#" class="active" data-page="dashboard"><span class="icon">📊</span> Dashboard</a>
+      <a href="#" data-page="mode"><span class="icon">🔄</span> 模式切换</a>
+      <a href="#" data-page="providers"><span class="icon">🤖</span> 模型管理</a>
+      <a href="#" data-page="keys"><span class="icon">🔑</span> API Keys</a>
+      <a href="#" data-page="logs"><span class="icon">📋</span> 请求日志</a>
+      <a href="#" data-page="backups"><span class="icon">💾</span> 备份管理</a>
+    </nav>
+    <div class="version">v0.1.0</div>
+  </div>
+
+  <!-- Main Content -->
+  <div class="main">
+    <!-- Dashboard -->
+    <div class="page active" id="page-dashboard">
+      <div class="page-header">
+        <h2>Dashboard</h2>
+        <p>代理服务运行状态概览</p>
+      </div>
+      <div class="stats-grid" id="stats-grid">
+        <div class="stat-card"><div class="label">今日请求</div><div class="value" id="stat-requests">-</div><div class="sub">total requests</div></div>
+        <div class="stat-card green"><div class="label">成功率</div><div class="value" id="stat-success">-</div><div class="sub">success rate</div></div>
+        <div class="stat-card orange"><div class="label">平均延迟</div><div class="value" id="stat-latency">-</div><div class="sub">avg latency</div></div>
+        <div class="stat-card"><div class="label">Token 用量</div><div class="value" id="stat-tokens">-</div><div class="sub">total tokens</div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>最近请求</h3></div>
+        <div class="log-list" id="dashboard-logs"></div>
+      </div>
+    </div>
+
+    <!-- Mode Switch -->
+    <div class="page" id="page-mode">
+      <div class="page-header">
+        <h2>模式切换</h2>
+        <p>在国产模型和 OpenAI 之间切换</p>
+      </div>
+      <div class="mode-card">
+        <div class="mode-current">
+          <span style="font-size:14px;color:#888;">当前模式：</span>
+          <span class="mode-badge" id="current-mode-badge">-</span>
+          <span id="current-mode-model" style="color:#aaa;font-size:13px;"></span>
+        </div>
+        <div class="mode-actions">
+          <div>
+            <select id="domestic-provider" style="margin-bottom:8px;">
+              <option value="mimo">MiMo</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="qwen">通义千问</option>
+              <option value="zhipu">智谱 GLM</option>
+              <option value="kimi">Kimi</option>
+            </select>
+            <br>
+            <select id="domestic-model" style="margin-bottom:8px;"></select>
+            <br>
+            <button class="btn btn-primary" onclick="switchToDomestic()">切换到国产模型</button>
+          </div>
+          <div style="border-left:1px solid #222;padding-left:24px;">
+            <select id="openai-model">
+              <option value="gpt-5.6-sol">GPT-5.6 Sol</option>
+              <option value="gpt-5.6-terra">GPT-5.6 Terra</option>
+              <option value="gpt-5.6-luna">GPT-5.6 Luna</option>
+              <option value="gpt-5.5">GPT-5.5</option>
+            </select>
+            <br>
+            <input type="password" id="openai-key" placeholder="OpenAI API Key (sk-...)" style="width:280px;margin-bottom:8px;">
+            <br>
+            <button class="btn btn-success" onclick="switchToOpenAI()">切换到 OpenAI 直连</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Providers -->
+    <div class="page" id="page-providers">
+      <div class="page-header">
+        <h2>模型管理</h2>
+        <p>查看所有已配置的 Provider 和可用模型</p>
+      </div>
+      <div class="provider-grid" id="provider-grid"></div>
+    </div>
+
+    <!-- API Keys -->
+    <div class="page" id="page-keys">
+      <div class="page-header">
+        <h2>API Keys</h2>
+        <p>管理各厂商的 API 密钥（AES-256 加密存储）</p>
+      </div>
+      <div class="card">
+        <div class="key-grid" id="key-grid"></div>
+      </div>
+    </div>
+
+        <!-- Logs -->
+    <div class="page" id="page-logs">
+      <div class="page-header">
+      <h2>请求日志</h2>
+      <p>代理服务请求记录与监控</p>
+    </div>
+    <div class="card">
+      <div class="log-list" id="log-list"></div>
+      <div id="log-load-more" style="text-align:center;padding:16px;display:none;">
+        <button class="btn btn-secondary" onclick="loadMoreLogs()">加载更多</button>
+        <span id="log-page-info" style="color:#666;font-size:12px;margin-left:12px;"></span>
+      </div>
+    </div>
+  </div>
+  
+<!-- Backups -->
+    <div class="page" id="page-backups">
+      <div class="page-header">
+        <h2>备份管理</h2>
+        <p>Codex 配置文件备份与恢复</p>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <h3>备份列表</h3>
+          <button class="btn btn-secondary btn-sm" onclick="createBackup()">创建备份</button>
+        </div>
+        <div id="backup-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = '/admin/api';
+    let providers = [];
+    let currentMode = null;
+
+    // Navigation
+    document.querySelectorAll('.sidebar nav a').forEach(a => {
+      a.addEventListener('click', e => {
+        e.preventDefault();
+        document.querySelectorAll('.sidebar nav a').forEach(x => x.classList.remove('active'));
+        document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
+        a.classList.add('active');
+        document.getElementById('page-' + a.dataset.page).classList.add('active');
+        loadPage(a.dataset.page);
+      });
+    });
+
+    function toast(msg) {
+      const t = document.createElement('div');
+      t.className = 'toast';
+      t.textContent = msg;
+      document.body.appendChild(t);
+      setTimeout(() => t.remove(), 3000);
+    }
+
+    async function api(path, opts) {
+      const r = await fetch(API + path, opts);
+      return r.json();
+    }
+
+    // Load providers
+    async function loadProviders() {
+      providers = await api('/providers');
+      renderProviders();
+      renderDomesticModels();
+      renderKeys();
+    }
+
+    function renderProviders() {
+      const grid = document.getElementById('provider-grid');
+      grid.innerHTML = providers.map(p => `
+        <div class="provider-card">
+          <div class="header">
+            <span class="name">${p.displayName}</span>
+            <span class="shortcut">${p.shortcut}</span>
+          </div>
+          <div class="default">默认: ${p.defaultModel}</div>
+          <div class="model-tags">
+            ${p.models.map(m => `
+              <span class="model-tag ${m.supportsImages ? 'vision' : ''} ${m.deprecatedAfter ? 'deprecated' : ''}">
+                <span class="dot"></span>${m.id}
+                ${m.supportsImages ? ' 📷' : ''}
+              </span>
+            `).join('')}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderDomesticModels() {
+      const sel = document.getElementById('domestic-model');
+      const provider = document.getElementById('domestic-provider').value;
+      const p = providers.find(x => x.id === provider);
+      sel.innerHTML = p ? p.models.filter(m => !m.deprecatedAfter).map(m =>
+        `<option value="${m.id}">${m.displayName || m.id}${m.supportsImages ? ' 📷' : ''}</option>`
+      ).join('') : '';
+    }
+
+    document.getElementById('domestic-provider').addEventListener('change', renderDomesticModels);
+
+    // Keys
+    async function renderKeys() {
+      const keys = await api('/keys');
+      const grid = document.getElementById('key-grid');
+      const providers_meta = [
+        { id: 'mimo', name: 'MiMo', env: 'MIMO_API_KEY', docs: 'https://platform.xiaomimimo.com/#/console/api-keys' },
+        { id: 'deepseek', name: 'DeepSeek', env: 'DEEPSEEK_API_KEY', docs: 'https://platform.deepseek.com/api_keys' },
+        { id: 'qwen', name: '通义千问', env: 'DASHSCOPE_API_KEY', docs: 'https://help.aliyun.com/zh/dashscope/' },
+        { id: 'zhipu', name: '智谱 GLM', env: 'ZHIPU_API_KEY', docs: 'https://open.bigmodel.cn/dev/api' },
+        { id: 'kimi', name: 'Kimi', env: 'KIMI_API_KEY', docs: 'https://platform.kimi.com/docs' },
+        { id: 'openai', name: 'OpenAI', env: 'OPENAI_API_KEY', docs: 'https://platform.openai.com/api-keys' },
+      ];
+      grid.innerHTML = providers_meta.map(p => `
+        <div class="key-row">
+          <label>${p.name}</label>
+          <input type="password" id="key-${p.id}" placeholder="${p.env}" value="${keys[p.id] || ''}">
+          <button class="btn btn-secondary btn-sm" onclick="saveKey('${p.id}')">保存</button>
+          <span class="saved" id="saved-${p.id}">✓ 已保存</span>
+          <a href="${p.docs}" target="_blank" style="color:#666;font-size:11px;text-decoration:none;">获取 Key →</a>
+        </div>
+      `).join('');
+    }
+
+    async function saveKey(providerId) {
+      const val = document.getElementById('key-' + providerId).value;
+      await api('/keys', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ providerId, apiKey: val }) });
+      const s = document.getElementById('saved-' + providerId);
+      s.classList.add('show');
+      setTimeout(() => s.classList.remove('show'), 2000);
+      toast('已保存 ' + providerId + ' API Key');
+    }
+
+    // Mode
+    async function loadMode() {
+      currentMode = await api('/mode');
+      const badge = document.getElementById('current-mode-badge');
+      const model = document.getElementById('current-mode-model');
+      if (currentMode.mode === 'openai-direct') {
+        badge.className = 'mode-badge openai';
+        badge.textContent = 'OpenAI 直连';
+        model.textContent = currentMode.model || '';
+      } else {
+        badge.className = 'mode-badge domestic';
+        badge.textContent = '国产模型';
+        model.textContent = (currentMode.provider || '') + ' / ' + (currentMode.model || '');
+      }
+    }
+
+    async function switchToDomestic() {
+      const provider = document.getElementById('domestic-provider').value;
+      const model = document.getElementById('domestic-model').value;
+      const r = await api('/mode/switch', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'domestic', providerId: provider, modelId: model })
+      });
+      toast(r.message || '已切换');
+      loadMode();
+    }
+
+    async function switchToOpenAI() {
+      const model = document.getElementById('openai-model').value;
+      const key = document.getElementById('openai-key').value;
+      if (!key) { toast('请输入 OpenAI API Key'); return; }
+      const r = await api('/mode/switch', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'openai', openaiKey: key, modelId: model })
+      });
+      toast(r.message || '已切换');
+      loadMode();
+    }
+
+        // Flat log view
+  async function toggleLog(el, id) {
+      el.classList.toggle('expanded');
+      if (el.classList.contains('expanded') && !el.dataset.loaded) {
+        el.dataset.loaded = '1';
+        const detail = el.querySelector('.log-detail');
+        try {
+          const r = await fetch(API + '/logs/' + id);
+          const log = await r.json();
+          if (log.request_body || log.response_body) {
+            var extra = '';
+            var reqObj = null;
+            try { reqObj = JSON.parse(log.request_body); } catch {}
+            if (reqObj && Array.isArray(reqObj.messages)) {
+              // Chat Completions format: reqObj.messages
+              extra += '<div class="conv-messages">';
+              reqObj.messages.forEach(function(msg) {
+                var role = msg.role || 'unknown';
+                var roleClass = role === 'assistant' ? 'assistant' : role === 'user' ? 'user' : role === 'system' ? 'system' : role === 'tool' ? 'tool' : 'user';
+                var roleIcon = role === 'user' ? '\u{1F464}' : role === 'assistant' ? '\u{1F916}' : role === 'system' ? '\u2699\uFE0F' : role === 'tool' ? '\u{1F527}' : '\u2753';
+                extra += '<div class="conv-msg role-' + roleClass + '">';
+                extra += '<div class="conv-role ' + roleClass + '"><span class="icon">' + roleIcon + '</span> ' + role.toUpperCase() + '</div>';
+                var content = '';
+                var thinking = '';
+                var images = [];
+                if (typeof msg.content === 'string') {
+                  content = msg.content;
+                } else if (Array.isArray(msg.content)) {
+                  msg.content.forEach(function(part) {
+                    if (typeof part === 'string') { content += part; }
+                    else if (part.type === 'text') { content += part.text || ''; }
+                    else if (part.type === 'reasoning' || part.type === 'thinking') { thinking += part.text || part.reasoning || ''; }
+                    else if (part.type === 'image_url' || part.type === 'image') { images.push(part.image_url && part.image_url.url ? part.image_url.url : part.url || ''); }
+                    else if (part.type === 'tool_use') {
+                      extra += '<div class="conv-tools"><div class="conv-tool"><span class="conv-tool-name">\u{1F527} ' + (part.name || 'tool_use') + '</span>';
+                      if (part.input) extra += '<div class="conv-tool-args">' + JSON.stringify(part.input, null, 2).substring(0, 1000).replace(/</g, '&lt;') + '</div>';
+                      extra += '</div></div>';
+                    }
+                    else if (part.type === 'tool_result') {
+                      extra += '<div class="conv-tools"><div class="conv-tool"><span class="conv-tool-name">\u{1F4CB} Result</span>';
+                      if (part.content) {
+                        var rt = typeof part.content === 'string' ? part.content : JSON.stringify(part.content);
+                        extra += '<div class="conv-tool-result">' + rt.substring(0, 2000).replace(/</g, '&lt;') + '</div>';
+                      }
+                      extra += '</div></div>';
+                    }
+                    else { content += JSON.stringify(part); }
+                  });
+                }
+                if (msg.tool_calls) {
+                  msg.tool_calls.forEach(function(tc) {
+                    var fn = tc.function || {};
+                    extra += '<div class="conv-tools"><div class="conv-tool"><span class="conv-tool-name">\u{1F527} ' + (fn.name || 'tool_call') + '</span>';
+                    if (fn.arguments) extra += '<div class="conv-tool-args">' + (typeof fn.arguments === 'string' ? fn.arguments : JSON.stringify(fn.arguments)).substring(0, 1000).replace(/</g, '&lt;') + '</div>';
+                    extra += '</div></div>';
+                  });
+                }
+                if (role === 'tool' && msg.tool_call_id) {
+                  extra += '<div style="font-size:11px;color:#666;margin-bottom:4px;">tool_call_id: ' + msg.tool_call_id + '</div>';
+                }
+                if (thinking) {
+                  extra += '<div class="conv-thinking"><div class="conv-thinking-label">\u{1F4AD} Thinking</div>' + thinking.substring(0, 3000).replace(/</g, '&lt;') + '</div>';
+                }
+                if (images.length > 0) {
+                  images.forEach(function(url) {
+                    if (url) extra += '<img src="' + url.substring(0, 500) + '" alt="image" style="max-width:200px;border-radius:6px;margin:4px 0;" />';
+                  });
+                }
+                if (content) {
+                  extra += '<div class="conv-content">' + content.substring(0, 5000).replace(/</g, '&lt;') + '</div>';
+                }
+                extra += '</div>';
+              });
+              extra += '</div>';
+            } else if (reqObj && reqObj.input) {
+              // Responses API format: reqObj.input
+              var inputItems = typeof reqObj.input === 'string' ? [{ type: 'message', role: 'user', content: reqObj.input }] : (Array.isArray(reqObj.input) ? reqObj.input : []);
+              extra += '<div class="conv-messages">';
+              inputItems.forEach(function(item) {
+                var role = item.role || (item.type === 'function_call_output' ? 'tool' : 'user');
+                var roleClass = role === 'assistant' ? 'assistant' : role === 'user' ? 'user' : role === 'system' ? 'system' : role === 'tool' ? 'tool' : 'user';
+                var roleIcon = role === 'user' ? '👤' : role === 'assistant' ? '🤖' : role === 'system' ? '⚙️' : role === 'tool' ? '🔧' : '❓';
+                extra += '<div class="conv-msg role-' + roleClass + '">';
+                extra += '<div class="conv-role ' + roleClass + '"><span class="icon">' + roleIcon + '</span> ' + role.toUpperCase() + '</div>';
+                var content = '';
+                var thinking = '';
+                var images = [];
+                if (item.type === 'message') {
+                  if (typeof item.content === 'string') { content = item.content; }
+                  else if (Array.isArray(item.content)) {
+                    item.content.forEach(function(part) {
+                      if (typeof part === 'string') { content += part; }
+                      else if (part.type === 'input_text') { content += part.text || ''; }
+                      else if (part.type === 'output_text') { content += part.text || ''; }
+                      else if (part.type === 'text') { content += part.text || ''; }
+                      else if (part.type === 'reasoning' || part.type === 'thinking') { thinking += part.text || part.reasoning || ''; }
+                      else if (part.type === 'image_url' || part.type === 'image' || part.type === 'input_image') { images.push(part.image_url && part.image_url.url ? part.image_url.url : part.url || ''); }
+                      else { content += JSON.stringify(part).substring(0, 500); }
+                    });
+                  }
+                  if (item.name) extra += '<div style="font-size:11px;color:#666;margin-bottom:4px;">name: ' + item.name + '</div>';
+                } else if (item.type === 'function_call_output') {
+                  var outText = typeof item.output === 'string' ? item.output : JSON.stringify(item.output);
+                  content = outText;
+                  if (item.call_id) extra += '<div style="font-size:11px;color:#666;margin-bottom:4px;">call_id: ' + item.call_id + '</div>';
+                }
+                if (thinking) {
+                  extra += '<div class="conv-thinking"><div class="conv-thinking-label">💭 Thinking</div>' + thinking.substring(0, 3000).replace(/</g, '&lt;') + '</div>';
+                }
+                if (images.length > 0) {
+                  images.forEach(function(url) {
+                    if (url) extra += '<img src="' + url.substring(0, 500) + '" alt="image" style="max-width:200px;border-radius:6px;margin:4px 0;" />';
+                  });
+                }
+                if (content) {
+                  extra += '<div class="conv-content">' + content.substring(0, 5000).replace(/</g, '&lt;') + '</div>';
+                }
+                extra += '</div>';
+              });
+              extra += '</div>';
+              if (reqObj.instructions) {
+                extra += '<div class="conv-msg role-system"><div class="conv-role system"><span class="icon">⚙️</span> SYSTEM (instructions)</div>';
+                extra += '<div class="conv-content">' + (typeof reqObj.instructions === 'string' ? reqObj.instructions : JSON.stringify(reqObj.instructions)).substring(0, 3000).replace(/</g, '&lt;') + '</div></div>';
+              }
+              if (Array.isArray(reqObj.tools) && reqObj.tools.length > 0) {
+                extra += '<div style="margin:4px 0;font-size:11px;color:#888;">Tools: ' + reqObj.tools.map(function(t) { return t.name || (t.function && t.function.name) || '?'; }).join(', ') + '</div>';
+              }
+            } else if (log.request_body) {
+              try {
+                var pretty = JSON.stringify(reqObj || log.request_body, null, 2).replace(/</g, '&lt;');
+                extra += '<div class="log-section"><strong>📤 Request Body</strong><pre class="raw-body">' + pretty.substring(0, 3000) + '</pre></div>';
+              } catch(e) { extra += '<div class="log-section"><strong>📤 Request</strong><pre class="raw-body">' + log.request_body.substring(0, 2000).replace(/</g, '&lt;') + '</pre></div>'; }
+            }
+            var respObj = null;
+            try { respObj = JSON.parse(log.response_body); } catch {}
+            if (respObj) {
+              var respInfo = '';
+              if (respObj.model) respInfo += '<span>Model: <code>' + respObj.model + '</code></span>';
+              if (respObj.usage) respInfo += '<span>Tokens: <code>' + (respObj.usage.prompt_tokens||respObj.usage.input_tokens||'-') + ' / ' + (respObj.usage.completion_tokens||respObj.usage.output_tokens||'-') + ' / ' + (respObj.usage.total_tokens||'-') + '</code></span>';
+              if (respObj.status) respInfo += '<span>Status: <code>' + respObj.status + '</code></span>';
+              if (respObj.choices && respObj.choices[0]) {
+                var choice = respObj.choices[0];
+                if (choice.finish_reason) respInfo += '<span>Finish: <code>' + choice.finish_reason + '</code></span>';
+                if (choice.message && choice.message.content) {
+                  extra += '<div class="conv-msg role-assistant"><div class="conv-role assistant"><span class="icon">\u{1F916}</span> ASSISTANT (response)</div>';
+                  extra += '<div class="conv-content">' + choice.message.content.substring(0, 5000).replace(/</g, '&lt;') + '</div></div>';
+                }
+              }
+              if (respObj.output && Array.isArray(respObj.output)) {
+                respObj.output.forEach(function(item) {
+                  if (item.type === 'reasoning' && item.summary) {
+                    var summaryText = '';
+                    item.summary.forEach(function(s) { summaryText += s.text || ''; });
+                    if (summaryText) {
+                      extra += '<div class="conv-thinking"><div class="conv-thinking-label">\u{1F4AD} Reasoning</div>' + summaryText.substring(0, 3000).replace(/</g, '&lt;') + '</div>';
+                    }
+                  } else if (item.type === 'message' && item.content) {
+                    item.content.forEach(function(c) {
+                      if (c.type === 'output_text' && c.text) {
+                        extra += '<div class="conv-msg role-assistant"><div class="conv-role assistant"><span class="icon">\u{1F916}</span> ASSISTANT</div>';
+                        extra += '<div class="conv-content">' + c.text.substring(0, 5000).replace(/</g, '&lt;') + '</div></div>';
+                      }
+                    });
+                  } else if (item.type === 'function_call') {
+                    extra += '<div class="conv-tools"><div class="conv-tool"><span class="conv-tool-name">\u{1F527} ' + (item.name || 'tool_call') + '</span>';
+                    if (item.arguments) extra += '<div class="conv-tool-args">' + (typeof item.arguments === 'string' ? item.arguments : JSON.stringify(item.arguments)).substring(0, 1000).replace(/</g, '&lt;') + '</div>';
+                    extra += '</div></div>';
+                  } else if (item.type === 'function_call_output') {
+                    extra += '<div class="conv-tools"><div class="conv-tool"><span class="conv-tool-name">\u{1F4CB} Tool Result</span>';
+                    if (item.output) {
+                      var outText = typeof item.output === 'string' ? item.output : JSON.stringify(item.output);
+                      extra += '<div class="conv-tool-result">' + outText.substring(0, 2000).replace(/</g, '&lt;') + '</div>';
+                    }
+                    extra += '</div></div>';
+                  }
+                });
+              }
+              if (respInfo) extra += '<div class="conv-response-summary">' + respInfo + '</div>';
+            }
+            if (log.error_code || log.error_snippet) {
+              extra += '<div class="log-error" style="margin-top:8px;"><span class="log-role">\u274C Error</span><pre style="background:#2a1a1a;border:1px solid #4a2a2a;border-radius:6px;padding:8px 12px;font-size:12px;white-space:pre-wrap;">' + ((log.error_code || '') + ' ' + (log.error_snippet || '')).substring(0, 2000).replace(/</g, '&lt;') + '</pre></div>';
+            }
+            extra += '<div class="conv-raw-toggle" onclick="event.stopPropagation();this.nextElementSibling.style.display=this.nextElementSibling.style.display==="none"?"block":"none";">View raw JSON</div>';
+            extra += '<div style="display:none;">';
+            if (log.request_body) {
+              try {
+                var rawReq = JSON.stringify(JSON.parse(log.request_body), null, 2).replace(/</g, '&lt;');
+                extra += '<div class="log-section"><strong>\u{1F4E4} Raw Request</strong><pre class="raw-body">' + rawReq.substring(0, 5000) + '</pre></div>';
+              } catch(e) {}
+            }
+            if (log.response_body) {
+              try {
+                var rawResp = JSON.stringify(JSON.parse(log.response_body), null, 2).replace(/</g, '&lt;');
+                extra += '<div class="log-section"><strong>\u{1F4E5} Raw Response</strong><pre class="raw-body">' + rawResp.substring(0, 5000) + '</pre></div>';
+              } catch(e) {}
+            }
+            extra += '</div>';
+            detail.innerHTML += extra;
+          }
+        } catch {}
+      }
+    }
+
+    let logOffset = 0;
+    const LOG_PAGE_SIZE = 100;
+    let logTotalStats = null;
+
+    async function loadLogs(append) {
+      if (!append) logOffset = 0;
+      const data = await api('/logs?limit=' + LOG_PAGE_SIZE + '&offset=' + logOffset);
+      const list = document.getElementById('log-list');
+      const dashList = document.getElementById('dashboard-logs');
+      logTotalStats = data.stats;
+      if (!data.logs || data.logs.length === 0) {
+        if (logOffset === 0) {
+          list.innerHTML = '<div class="empty"><div class="icon">\u{1F4CB}</div>\u6682\u65E0\u8BF7\u6C42\u65E5\u5FD7</div>';
+          dashList.innerHTML = '<div class="empty">\u6682\u65E0\u8BF7\u6C42</div>';
+        }
+        document.getElementById('log-load-more').style.display = 'none';
+        return;
+      }
+      const logsHtml = data.logs.map(l => {
+        const hasContent = l.user_message || l.assistant_response || l.request_body;
+        const userMsg = l.user_message ? l.user_message.substring(0, 300).replace(/</g, '&lt;') : '';
+        const asstResp = l.assistant_response ? l.assistant_response.substring(0, 500).replace(/</g, '&lt;') : '';
+        const errSnippet = l.error_snippet ? l.error_snippet.substring(0, 300).replace(/</g, '&lt;') : '';
+        const entryId = l.id;
+        return `
+        <div class="log-entry ${hasContent ? 'log-expandable' : ''}" ${hasContent ? 'data-log-id="' + entryId + '"' : ''}>
+          <div class="log-main">
+            <span class="time">${new Date(l.ts).toLocaleTimeString()}</span>
+            <span class="status ${l.status_code < 400 ? 'ok' : 'err'}">${l.status_code}</span>
+            <span class="provider">${l.provider_id}</span>
+            <span class="model">${l.upstream_model || l.client_model || '-'}</span>
+            <span class="duration">${l.duration_ms}ms</span>
+            <span class="tokens">${l.total_tokens ? l.total_tokens + ' tok' : ''}</span>
+            <span class="stream-badge">${l.stream ? '\u26A1\u6D41\u5F0F' : '\u{1F4DD}'}</span>
+          </div>
+          <div class="log-detail">
+          </div>
+        </div>`;
+      }).join('');
+      if (append) {
+        list.innerHTML += logsHtml;
+      } else {
+        list.innerHTML = logsHtml;
+      }
+      logOffset += data.logs.length;
+      document.querySelectorAll('.log-expandable').forEach(function(entry) {
+        if (!entry.dataset.bound) {
+          entry.dataset.bound = '1';
+          entry.addEventListener('click', function() { toggleLog(this, this.dataset.logId); });
+        }
+      });
+      var loadMore = document.getElementById('log-load-more');
+      var pageInfo = document.getElementById('log-page-info');
+      if (data.logs.length < LOG_PAGE_SIZE) {
+        loadMore.style.display = 'none';
+      } else {
+        loadMore.style.display = 'block';
+        pageInfo.textContent = '已加载 ' + logOffset + ' 条';
+      }
+      dashList.innerHTML = data.logs.slice(0, 10).map(l => `
+        <div class="log-entry">
+          <span class="time">${new Date(l.ts).toLocaleTimeString()}</span>
+          <span class="status ${l.status_code < 400 ? 'ok' : 'err'}">${l.status_code}</span>
+          <span class="provider">${l.provider_id}</span>
+          <span class="model">${l.upstream_model || '-'}</span>
+          <span class="duration">${l.duration_ms}ms</span>
+        </div>
+      `).join('');
+      const total = data.logs.length;
+      const success = data.logs.filter(l => l.status_code < 400).length;
+      const avgLatency = total > 0 ? Math.round(data.logs.reduce((a, l) => a + (l.duration_ms || 0), 0) / total) : 0;
+      const totalTokens = data.logs.reduce((a, l) => a + (l.total_tokens || 0), 0);
+      document.getElementById('stat-requests').textContent = total;
+      document.getElementById('stat-success').textContent = total > 0 ? Math.round(success / total * 100) + '%' : '-';
+      document.getElementById('stat-latency').textContent = avgLatency + 'ms';
+      document.getElementById('stat-tokens').textContent = totalTokens > 1000 ? (totalTokens / 1000).toFixed(1) + 'K' : totalTokens;
+    }
+
+    // Backups
+    async function loadBackups() {
+      const data = await api('/backups');
+      const list = document.getElementById('backup-list');
+      if (!data.backups || data.backups.length === 0) {
+        list.innerHTML = '<div class="empty"><div class="icon">💾</div>暂无备份</div>';
+        return;
+      }
+      list.innerHTML = data.backups.map(b => `
+        <div class="backup-item">
+          <div class="info">
+            <div style="color:#ccc;">${b.name}</div>
+            <div class="time">${new Date(b.ts).toLocaleString()}</div>
+          </div>
+          <div class="actions">
+            <button class="btn btn-secondary btn-sm" onclick="restoreBackup('${b.name}')">恢复</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteBackup('${b.name}')">删除</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function createBackup() {
+      await api('/backups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create' }) });
+      toast('备份已创建');
+      loadBackups();
+    }
+
+    async function restoreBackup(name) {
+      if (!confirm('确定要恢复备份 ' + name + ' 吗？')) return;
+      await api('/backups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'restore', name }) });
+      toast('备份已恢复');
+    }
+
+    async function deleteBackup(name) {
+      if (!confirm('确定要删除备份 ' + name + ' 吗？')) return;
+      await api('/backups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', name }) });
+      toast('备份已删除');
+      loadBackups();
+    }
+
+    // Page loader
+    function loadPage(page) {
+      if (page === 'mode') loadMode();
+      if (page === 'logs') { loadConversations(); loadLogs(); }
+      if (page === 'backups') loadBackups();
+    }
+
+    function loadMoreLogs() {
+      loadLogs(true);
+    }
+
+    // Init
+    loadProviders();
+    loadMode();
+    loadLogs(false);
+  </script>
+</body>
+</html>
