@@ -217,7 +217,48 @@
     .conv-log-entry.expanded .conv-log-detail { display: block; }
     .conv-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: #444; font-size: 14px; }
 
-  </style>
+  
+/* Conversation Management */
+.conv-list { max-height: 60vh; overflow-y: auto; }
+.conv-item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid #1a1a2e; cursor: pointer; transition: background 0.15s; }
+.conv-item:hover { background: rgba(79,195,247,0.05); }
+.conv-item.active { background: rgba(79,195,247,0.1); border-left: 3px solid #4fc3f7; }
+.conv-item .conv-icon { font-size: 24px; flex-shrink: 0; }
+.conv-item .conv-info { flex: 1; min-width: 0; }
+.conv-item .conv-title { font-size: 14px; color: #e0e0e0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conv-item .conv-meta { font-size: 11px; color: #666; margin-top: 4px; }
+.conv-item .conv-meta span { margin-right: 12px; }
+.conv-item .conv-meta .conv-count { color: #4fc3f7; }
+.conv-item .conv-meta .conv-tokens { color: #81c784; }
+.conv-item .conv-meta .conv-errors { color: #f44336; }
+.conv-detail { display: flex; flex-direction: column; height: calc(100vh - 180px); }
+.conv-detail-header { padding: 16px 20px; border-bottom: 1px solid #1a1a2e; }
+.conv-detail-header h3 { font-size: 16px; color: #e0e0e0; margin: 0 0 8px 0; }
+.conv-detail-header .conv-detail-meta { font-size: 12px; color: #666; }
+.conv-turns { flex: 1; overflow-y: auto; padding: 0 20px; }
+.conv-turn { border-bottom: 1px solid #111; padding: 16px 0; }
+.conv-turn-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.conv-turn-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; }
+.conv-turn-badge.user { background: rgba(79,195,247,0.15); color: #4fc3f7; }
+.conv-turn-badge.assistant { background: rgba(76,175,80,0.15); color: #4caf50; }
+.conv-turn-badge.tool { background: rgba(255,183,77,0.15); color: #ffb74d; }
+.conv-turn-time { font-size: 11px; color: #555; font-family: monospace; }
+.conv-turn-model { font-size: 11px; color: #888; }
+.conv-turn-stats { font-size: 11px; color: #666; margin-left: auto; }
+.conv-turn-content { font-size: 13px; color: #ccc; line-height: 1.6; }
+.conv-turn-content pre { background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 6px; padding: 12px; overflow-x: auto; font-size: 12px; margin: 8px 0; }
+.conv-turn-content .tool-name { color: #ffb74d; font-family: monospace; }
+.conv-turn-expand { cursor: pointer; color: #4fc3f7; font-size: 12px; margin-top: 4px; }
+.conv-turn-expand:hover { text-decoration: underline; }
+.conv-turn-full { display: none; margin-top: 8px; padding: 12px; background: #0a0a14; border-radius: 6px; }
+.conv-turn.expanded .conv-turn-full { display: block; }
+.conv-empty { text-align: center; padding: 60px 20px; color: #555; }
+.conv-empty .icon { font-size: 48px; margin-bottom: 16px; }
+.conv-split { display: flex; gap: 0; height: calc(100vh - 180px); }
+.conv-split-left { width: 360px; border-right: 1px solid #1a1a2e; overflow-y: auto; flex-shrink: 0; }
+.conv-split-right { flex: 1; overflow-y: auto; }
+
+</style>
 </head>
 <body>
   <!-- Sidebar -->
@@ -232,6 +273,7 @@
       <a href="#" data-page="providers"><span class="icon">🤖</span> 模型管理</a>
       <a href="#" data-page="keys"><span class="icon">🔑</span> API Keys</a>
       <a href="#" data-page="logs"><span class="icon">📋</span> 请求日志</a>
+      <a href="#" data-page="conversations"><span class="icon">💬</span> 会话管理</a>
       <a href="#" data-page="backups"><span class="icon">💾</span> 备份管理</a>
     </nav>
     <div class="version">v0.1.0</div>
@@ -334,6 +376,27 @@
     </div>
   </div>
   
+
+<!-- Conversations -->
+<div class="page" id="page-conversations">
+  <div class="page-header">
+    <h2>会话管理</h2>
+    <p>按对话归类的完整会话记录</p>
+  </div>
+  <div class="conv-split">
+    <div class="conv-split-left">
+      <div class="conv-list" id="conv-list">
+        <div class="conv-empty"><div class="icon">💬</div><p>加载中...</p></div>
+      </div>
+    </div>
+    <div class="conv-split-right">
+      <div id="conv-detail">
+        <div class="conv-empty"><div class="icon">🔍</div><p>选择一个会话查看详细内容</p></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Backups -->
     <div class="page" id="page-backups">
       <div class="page-header">
@@ -817,6 +880,7 @@
     function loadPage(page) {
       if (page === 'mode') loadMode();
       if (page === 'logs') { loadConversations(); loadLogs(); }
+    if (page === 'conversations') { loadConversations2(); }
       if (page === 'backups') loadBackups();
     }
 
@@ -824,7 +888,96 @@
       loadLogs(true);
     }
 
-    // Init
+    // Conversation Management
+let currentConvId = null;
+
+async function loadConversations2() {
+  var data = await api('/conversations?limit=100');
+  var list = document.getElementById('conv-list');
+  if (!data.conversations || data.conversations.length === 0) {
+    list.innerHTML = '<div class="conv-empty"><div class="icon">&#x1f4ac;</div><p>暂无会话记录</p></div>';
+    return;
+  }
+  list.innerHTML = data.conversations.map(function(c) {
+    var time = new Date(c.last_ts).toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+    var firstTime = new Date(c.first_ts).toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+    var preview = (c.last_user_message || '').substring(0, 60).replace(/</g, '&lt;');
+    return '<div class="conv-item" onclick="openConversation(this, \'' + c.thread_id + '\')">' +
+      '<div class="conv-icon">&#x1f4ac;</div>' +
+      '<div class="conv-info">' +
+        '<div class="conv-title">' + preview + '</div>' +
+        '<div class="conv-meta">' +
+          '<span>' + firstTime + '</span>' +
+          '<span class="conv-count">' + c.message_count + '轮</span>' +
+          '<span class="conv-tokens">' + fmtTokens(c.total_tokens) + '</span>' +
+          (c.total_errors > 0 ? '<span class="conv-errors">' + c.total_errors + '错</span>' : '') +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+async function openConversation(el, threadId) {
+  currentConvId = threadId;
+  document.querySelectorAll('.conv-item').forEach(function(e) { e.classList.remove('active'); });
+  el.classList.add('active');
+  var detail = document.getElementById('conv-detail');
+  detail.innerHTML = '<div class="conv-empty"><p>加载中...</p></div>';
+  var data = await api('/conversations/' + encodeURIComponent(threadId));
+  if (data.error) {
+    detail.innerHTML = '<div class="conv-empty"><p>' + data.error + '</p></div>';
+    return;
+  }
+  var logs = data.logs || [];
+  var firstLog = logs[0] || {};
+  var totalTokens = logs.reduce(function(a, l) { return a + (l.total_tokens || 0); }, 0);
+  var totalDuration = logs.reduce(function(a, l) { return a + (l.duration_ms || 0); }, 0);
+  var errorCount = logs.filter(function(l) { return l.status_code >= 400; }).length;
+  var h = '<div class="conv-detail">';
+  h += '<div class="conv-detail-header">';
+  h += '<h3>' + logs.length + ' 轮对话</h3>';
+  h += '<div class="conv-detail-meta">';
+  h += '<span>模型: ' + (firstLog.upstream_model || firstLog.client_model || '-') + '</span> | ';
+  h += '<span>总耗时: ' + Math.round(totalDuration/1000) + 's</span> | ';
+  h += '<span>总 tokens: ' + fmtTokens(totalTokens) + '</span>';
+  if (errorCount > 0) h += ' | <span style="color:#f44336">' + errorCount + ' 个错误</span>';
+  h += '</div></div>';
+  h += '<div class="conv-turns">';
+  logs.forEach(function(log) {
+    var time = new Date(log.ts).toLocaleTimeString('zh-CN');
+    var userMsg = (log.user_message || '').substring(0, 500);
+    var asstResp = (log.assistant_response || '').substring(0, 2000);
+    h += '<div class="conv-turn" onclick="this.classList.toggle(\'expanded\')">';
+    h += '<div class="conv-turn-header">';
+    h += '<span class="conv-turn-badge user">User</span>';
+    h += '<span class="conv-turn-time">' + time + '</span>';
+    h += '<span class="conv-turn-model">' + (log.upstream_model || '') + '</span>';
+    h += '<span class="conv-turn-stats">' + fmtTokens(log.total_tokens || 0) + ' tokens | ' + (log.duration_ms || 0) + 'ms</span>';
+    h += '</div>';
+    h += '<div class="conv-turn-content"><pre>' + escHtml(userMsg || '(empty)') + '</pre></div>';
+    h += '<div class="conv-turn-header" style="margin-top:12px">';
+    h += '<span class="conv-turn-badge assistant">Assistant</span>';
+    if (log.tool_call_count > 0) h += '<span class="conv-turn-badge tool">' + log.tool_call_count + ' tools</span>';
+    h += '</div>';
+    h += '<div class="conv-turn-content"><pre>' + escHtml(asstResp || '(empty)') + '</pre></div>';
+    h += '</div>';
+  });
+  h += '</div></div>';
+  detail.innerHTML = h;
+}
+
+function fmtTokens(n) {
+  if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n/1000).toFixed(1) + 'k';
+  return String(n);
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+
+        // Init
     loadProviders();
     loadMode();
     loadLogs(false);

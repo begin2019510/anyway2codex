@@ -99,51 +99,97 @@ function partsToChatContent(
 
 // Convert Responses input items to Chat messages
 // Convert Responses input items to Chat messages
+function flushAssistant(out: ChatMessage[], state: {
+  pendingReasoning: string | null;
+  pendingToolCalls: ChatToolCall[];
+  pendingAssistantText: string | null;
+}) {
+  const hasReasoning = state.pendingReasoning !== null;
+  const hasTools = state.pendingToolCalls.length > 0;
+  const hasText = state.pendingAssistantText !== null;
+  if (!hasReasoning && !hasTools && !hasText) return;
+  const msg: any = { role: 'assistant' };
+  if (hasText) { msg.content = state.pendingAssistantText; }
+  else if (!hasTools) { msg.content = ""; }
+  if (hasTools) msg.tool_calls = state.pendingToolCalls;
+  if (hasReasoning) msg.reasoning_content = state.pendingReasoning;
+  out.push(msg);
+  state.pendingReasoning = null;
+  state.pendingToolCalls = [];
+  state.pendingAssistantText = null;
+}
+
 function inputToMessages(
   input: ResponsesInputItem[],
   ctx: { model: string; supportsImages: boolean; imageDropDir?: string }
 ): ChatMessage[] {
-  const messages: ChatMessage[] = [];
+  const out: ChatMessage[] = [];
+  const state = {
+    pendingReasoning: null as string | null,
+    pendingToolCalls: [] as ChatToolCall[],
+    pendingAssistantText: null as string | null,
+  };
 
-  for (const item of input) {
-    if (item.type === "message") {
-      const content = partsToChatContent(item.content, ctx);
-      messages.push({ role: item.role as ChatMessage["role"], content: content || undefined });
-    } else if (item.type === "function_call_output") {
-      messages.push({
-        role: "tool",
-        tool_call_id: item.call_id,
-        content: typeof item.output === "string" ? item.output : JSON.stringify(item.output),
-      });
-    } else if ((item as any).type === "function_call") {
-      const fc = item as any;
-      messages.push({
-        role: "assistant",
-        content: null,
-        tool_calls: [{ id: fc.call_id, type: "function", function: { name: fc.name, arguments: fc.arguments || "" } }],
-      } as any);
-    } else if ((item as any).type === "reasoning") {
-      const r = item as any;
-      let text = "";
-      if (typeof r.encrypted_content === "string" && r.encrypted_content.length > 0) {
-        text = r.encrypted_content;
-      } else if (Array.isArray(r.summary)) {
-        text = r.summary.filter((s: any) => s.type === "summary_text").map((s: any) => s.text).join("");
+  for (const rawItem of input) {
+    let item = rawItem as any;
+    if (item && typeof item === "object" && !item.type) {
+      if (typeof item.role === "string") {
+        const text = typeof item.content === "string"
+          ? item.content
+          : Array.isArray(item.content)
+            ? item.content.map((p: any) => typeof p === "string" ? p : (p?.text ?? "")).join("")
+            : "";
+        item = { type: "message", role: item.role, content: [{ type: item.role === "assistant" ? "output_text" : "input_text", text }] };
       }
-      if (text) {
-        const lastAsst = [...messages].reverse().find(m => m.role === "assistant");
-        if (lastAsst) {
-          (lastAsst as any).reasoning_content = text;
+    }
+
+    switch (item.type) {
+      case "message": {
+        if (item.role === "assistant") {
+          if (state.pendingAssistantText !== null) flushAssistant(out, state);
+          const content = partsToChatContent(item.content, ctx);
+          state.pendingAssistantText = typeof content === "string" ? content : "";
         } else {
-          messages.push({ role: "assistant", content: null, reasoning_content: text } as any);
+          flushAssistant(out, state);
+          const content = partsToChatContent(item.content, ctx);
+          out.push({ role: item.role as any, content: content || undefined });
         }
+        break;
+      }
+      case "reasoning": {
+        let text = "";
+        if (typeof item.encrypted_content === "string" && item.encrypted_content.length > 0) {
+          text = item.encrypted_content;
+        } else if (Array.isArray(item.summary)) {
+          text = item.summary.filter((s: any) => s.type === "summary_text").map((s: any) => s.text).join("");
+        }
+        if (state.pendingToolCalls.length > 0 || state.pendingAssistantText !== null) {
+          state.pendingReasoning = state.pendingReasoning !== null ? state.pendingReasoning + text : text;
+        } else {
+          flushAssistant(out, state);
+          state.pendingReasoning = text;
+        }
+        break;
+      }
+      case "function_call": {
+        state.pendingToolCalls.push({
+          id: item.call_id, type: "function",
+          function: { name: item.name, arguments: item.arguments || "" },
+        } as any);
+        break;
+      }
+      case "function_call_output": {
+        flushAssistant(out, state);
+        out.push({ role: "tool", tool_call_id: item.call_id,
+          content: typeof item.output === "string" ? item.output : JSON.stringify(item.output),
+        });
+        break;
       }
     }
   }
-
-  return messages;
+  flushAssistant(out, state);
+  return out;
 }
-
 
 
 // Convert Responses tools to Chat tools
@@ -211,6 +257,7 @@ export function reqToChat(req: ResponsesRequest, opts: ReqToChatOpts = {}): Chat
     model: opts.upstreamModel ?? req.model,
     messages,
     stream: true,
+    stream_options: { include_usage: true },
   };
 
   if (chatTools && chatTools.length > 0) {

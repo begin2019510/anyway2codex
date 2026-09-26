@@ -73,6 +73,7 @@ export interface ChatRequest {
   top_p?: number;
   max_completion_tokens?: number;
   stream?: boolean;
+  stream_options?: { include_usage: boolean };
   reasoning_effort?: string;
   thinking?: { type: string };
 }
