@@ -149,10 +149,9 @@ function respondToResponsesProbe(body: any, res: ServerResponse, stream: boolean
 function resolveAutoCompact(cfg: AppConfig, contextWindow?: number): { enabled: boolean; atTokens: number | null } {
   const enabled = cfg.autoCompact !== false;
   if (!enabled) return { enabled: false, atTokens: null };
-  const threshold = cfg.autoCompactThreshold ?? 0.8;
-  const atTokens = contextWindow && contextWindow > 0
-    ? Math.floor(contextWindow * threshold)
-    : null;
+  // Use absolute threshold (default 80K), not percentage of advertised contextWindow.
+  // MiMo/DeepSeek advertise 1M but real limit is ~128K.
+  const atTokens = cfg.autoCompactAtTokens ?? 50_000;
   return { enabled, atTokens };
 }
 
@@ -194,6 +193,10 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
       // Pipe upstream SSE bytes directly to client (NO second writeHead)
       if (upstreamRes.body && typeof upstreamRes.body.getReader === "function") {
         const reader = upstreamRes.body.getReader();
+        ac.signal.addEventListener("abort", () => {
+          try { upstreamRes.body?.cancel(); } catch {}
+          try { reader.cancel(); } catch {}
+        }, { once: true });
         try {
           while (true) {
             const { done, value } = await reader.read();
@@ -206,6 +209,7 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
           log.error("passthrough stream read error: " + (err as Error).message);
         } finally {
           clearInterval(keepalive);
+          try { reader.cancel(); } catch {}
           try { res.end(); } catch {}
         }
       } else {

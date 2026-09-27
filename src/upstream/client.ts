@@ -120,7 +120,12 @@ async function postUpstream(
   const maxRetries = cfg.maxRetries ?? 6;
   const baseMs = cfg.retryBaseMs ?? 500;
   const serialized = JSON.stringify(body);
-  const doFetch = () => fetch(url, { method: "POST", headers, body: serialized, signal });
+  // Per-request timeout: abort if upstream doesn't respond in 120s
+  const timeoutAc = new AbortController();
+  const timeoutId = setTimeout(() => timeoutAc.abort(), 120_000);
+  // Chain: if either the caller signal OR the timeout fires, abort
+  const mergedSignal = AbortSignal.any([signal, timeoutAc.signal]);
+  const doFetch = () => fetch(url, { method: "POST", headers, body: serialized, signal: mergedSignal });
 
   let attempt = 0;
   for (;;) {
@@ -133,12 +138,15 @@ async function postUpstream(
         const delay = retryDelayMs(null, attempt, baseMs);
         log.warn("upstream connect failed, retry " + (attempt + 1) + "/" + maxRetries + " in " + delay + "ms");
         await abortableSleep(delay, signal);
+        clearTimeout(timeoutId);
         attempt++;
         continue;
       }
-      throw new UpstreamError({ status: 502, code: "upstream_unreachable", message: "failed to reach upstream: " + err.message });
+      clearTimeout(timeoutId);
+    throw new UpstreamError({ status: 502, code: "upstream_unreachable", message: "failed to reach upstream: " + err.message });
     }
 
+    clearTimeout(timeoutId);
     if (res.ok) return res;
 
     if (RETRYABLE_STATUSES.has(res.status) && attempt < maxRetries) {

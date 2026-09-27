@@ -9,6 +9,7 @@ export interface AppConfig {
   webSearch?: boolean;
   autoCompact?: boolean;
   autoCompactThreshold?: number;
+  autoCompactAtTokens?: number;
 }
 
 export function parseArgv(argv: string[]): Record<string, string | number | boolean> {
