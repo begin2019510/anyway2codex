@@ -151,7 +151,7 @@ function resolveAutoCompact(cfg: AppConfig, contextWindow?: number): { enabled: 
   if (!enabled) return { enabled: false, atTokens: null };
   // Use absolute threshold (default 80K), not percentage of advertised contextWindow.
   // MiMo/DeepSeek advertise 1M but real limit is ~128K.
-  const atTokens = cfg.autoCompactAtTokens ?? 50_000;
+  const atTokens = cfg.autoCompactAtTokens ?? 800_000;
   return { enabled, atTokens };
 }
 
@@ -193,7 +193,12 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
       // Pipe upstream SSE bytes directly to client (NO second writeHead)
       if (upstreamRes.body && typeof upstreamRes.body.getReader === "function") {
         const reader = upstreamRes.body.getReader();
-        ac.signal.addEventListener("abort", () => {
+        // Body read timeout: 120s of no data = abort
+        const bodyTimeoutAc = new AbortController();
+        const bodyTimeoutId = setTimeout(() => bodyTimeoutAc.abort(), 120_000);
+        const mergedSignal = AbortSignal.any([ac.signal, bodyTimeoutAc.signal]);
+        mergedSignal.addEventListener("abort", () => {
+          clearTimeout(bodyTimeoutId);
           try { upstreamRes.body?.cancel(); } catch {}
           try { reader.cancel(); } catch {}
         }, { once: true });
@@ -208,6 +213,7 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
         } catch (err) {
           log.error("passthrough stream read error: " + (err as Error).message);
         } finally {
+          clearTimeout(bodyTimeoutId);
           clearInterval(keepalive);
           try { reader.cancel(); } catch {}
           try { res.end(); } catch {}
@@ -253,6 +259,7 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
   };
 
   const chatBody = route.provider.preprocessResponses(body, ctx);
+  console.error("[UPSTREAM REQ] model=" + (chatBody as any).model + " msgs=" + (chatBody as any).messages?.length + " tools=" + ((chatBody as any).tools?.length ?? 0) + " stream=" + (chatBody as any).stream + " reasoning_effort=" + (chatBody as any).reasoning_effort);
   // Auto-compact: summarize old messages when context gets too long
   const autoCompact = resolveAutoCompact(cfg, resolvedModel?.contextWindow);
   if (autoCompact.enabled && autoCompact.atTokens != null && (chatBody as any).messages) {
@@ -294,7 +301,20 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
       const code = isUpstream ? err.code : "internal_error";
       if (!isUpstream) log.error("stream pre-stream error: " + (err as Error).message);
       if (!sink.closed()) {
-        sink.write("error", { type: "error", code, message: (err as Error).message, sequence_number: 9999 });
+        // Codex expects response.failed (not raw error) as terminal SSE event
+        sink.write("response.failed", {
+          type: "response.failed",
+          sequence_number: 9999,
+          response: {
+            id: "resp_failed",
+            object: "response",
+            created_at: Math.floor(Date.now() / 1000),
+            status: "failed",
+            model: body.model,
+            output: [],
+            error: { type: "upstream_error", code, message: (err as Error).message },
+          },
+        });
         sink.end();
       }
       insertLog({
@@ -318,9 +338,15 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
       streamError = err;
       log.error("stream mid-stream error: " + (err as Error).message);
       if (!sink.closed()) {
-        sink.write("error", {
-          type: "error", code: "server_error",
-          message: (err as Error).message, sequence_number: 9999,
+        sink.write("response.failed", {
+          type: "response.failed",
+          sequence_number: 9999,
+          response: {
+            id: "resp_failed", object: "response",
+            created_at: Math.floor(Date.now() / 1000),
+            status: "failed", model: body.model, output: [],
+            error: { type: "upstream_error", message: (err as Error).message },
+          },
         });
         sink.end();
       }
@@ -450,6 +476,14 @@ async function handleChatPassthrough(cfg: AppConfig, req: IncomingMessage, res: 
     if (contentType.includes("text/event-stream") && body.stream) {
       if (response.body && typeof response.body.getReader === "function") {
         const reader = response.body.getReader();
+        const bodyTimeoutAc = new AbortController();
+        const bodyTimeoutId = setTimeout(() => bodyTimeoutAc.abort(), 120_000);
+        const mergedSignal = AbortSignal.any([ac.signal, bodyTimeoutAc.signal]);
+        mergedSignal.addEventListener("abort", () => {
+          clearTimeout(bodyTimeoutId);
+          try { response.body?.cancel(); } catch {}
+          try { reader.cancel(); } catch {}
+        }, { once: true });
         try {
           while (true) {
             const { done, value } = await reader.read();
@@ -459,7 +493,9 @@ async function handleChatPassthrough(cfg: AppConfig, req: IncomingMessage, res: 
         } catch (err) {
           try { log.error("chat passthrough stream error: " + (err as Error).message); } catch {}
         } finally {
+          clearTimeout(bodyTimeoutId);
           if (chatKeepalive) clearInterval(chatKeepalive);
+          try { reader.cancel(); } catch {}
           try { res.end(); } catch {}
         }
       } else {

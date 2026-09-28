@@ -120,6 +120,7 @@ async function postUpstream(
   const maxRetries = cfg.maxRetries ?? 6;
   const baseMs = cfg.retryBaseMs ?? 500;
   const serialized = JSON.stringify(body);
+  if (process.env.ANYWAY2CODEX_DEBUG_UPSTREAM) { console.error("[POST] " + url + " body_len=" + serialized.length + " model=" + (body as any).model + " msgs=" + ((body as any).messages?.length ?? 0) + " tools=" + ((body as any).tools?.length ?? 0)); }
   // Per-request timeout: abort if upstream doesn't respond in 120s
   const timeoutAc = new AbortController();
   const timeoutId = setTimeout(() => timeoutAc.abort(), 120_000);
