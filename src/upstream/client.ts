@@ -69,11 +69,13 @@ export async function callOpenAICompat(
   body: Record<string, unknown>,
   signal: AbortSignal,
 ): Promise<Response> {
-  return await postUpstream(cfg, "/chat/completions", body, signal);
+  const normalized = { ...body };
+  if (normalized.stream !== true) delete normalized.stream_options;
+  return await postUpstream(cfg, "/chat/completions", normalized, signal);
 }
 
 // Sanitize Responses API body: strip params unsupported by non-OpenAI providers
-function sanitizePassthroughBody(body: Record<string, unknown>): Record<string, unknown> {
+export function sanitizePassthroughBody(body: Record<string, unknown>): Record<string, unknown> {
   const stripTop = new Set([
     "store", "include", "prompt_cache_key", "client_metadata",
     "previous_response_id", "background", "context_management",
@@ -100,7 +102,7 @@ export async function callResponsesPassthrough(
   body: Record<string, unknown>,
   signal: AbortSignal,
 ): Promise<Response> {
-  return await postUpstream(cfg, "/responses", body, signal);
+  return await postUpstream(cfg, "/responses", sanitizePassthroughBody(body), signal);
 }
 
 async function postUpstream(
@@ -134,7 +136,16 @@ async function postUpstream(
     try {
       res = await doFetch();
     } catch (err: any) {
-      if (err.name === "AbortError") throw err;
+      if (err.name === "AbortError") {
+        if (timeoutAc.signal.aborted && !signal.aborted) {
+          throw new UpstreamError({
+            status: 504,
+            code: "upstream_timeout",
+            message: "upstream did not respond before the request timeout",
+          });
+        }
+        throw err;
+      }
       if (attempt < maxRetries) {
         const delay = retryDelayMs(null, attempt, baseMs);
         log.warn("upstream connect failed, retry " + (attempt + 1) + "/" + maxRetries + " in " + delay + "ms");

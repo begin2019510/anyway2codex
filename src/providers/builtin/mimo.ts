@@ -72,19 +72,24 @@ function webSearchAllowed(ctx: PreprocessCtx): boolean {
 
 // MiMo-specific body normalization
 function normalizeMimoBody(chat: ChatRequest, model: string): ChatRequest {
-  // MiMo reasoning_effort only accepts low/medium/high
+  // Responses API accepts reasoning.effort, but the Chat Completions endpoint
+  // used by this proxy exposes the equivalent switch as thinking.type.
+  // `none` disables thinking; every other effort level enables it. MiMo
+  // currently treats all non-none levels as the same enabled mode.
   if (chat.reasoning_effort === "none") {
-    delete chat.reasoning_effort;
+    chat.thinking = { type: "disabled" };
+  } else if (chat.thinking === undefined) {
+    chat.thinking = { type: "enabled" };
   }
+  delete chat.reasoning_effort;
   // MiMo uses thinking:{type} not enable_thinking
   delete (chat as any).enable_thinking;
-  // tool_choice "auto" is default, MiMo may not accept it
-  if (chat.tool_choice === "auto") {
-    delete chat.tool_choice;
-  }
-  // Strip reasoning_effort when thinking is disabled
-  if (chat.thinking?.type === "disabled" && chat.reasoning_effort === "none") {
-    delete chat.reasoning_effort;
+  // MiMo only accepts auto/default tool_choice; drop non-auto values.
+  if (chat.tool_choice && chat.tool_choice !== "auto") delete chat.tool_choice;
+  // Thinking mode: temperature/top_p forced to defaults, so remove them.
+  if (chat.thinking?.type === "enabled") {
+    delete chat.temperature;
+    delete chat.top_p;
   }
   return chat;
 }
@@ -93,7 +98,7 @@ export const mimo: Provider = {
   id: "mimo",
   shortcut: "mimo",
   displayName: "MiMo (via Xiaomi)",
-  defaultBaseUrl: PAYG_BASE_URL,
+  defaultBaseUrl: TOKEN_PLAN_BASE_URL,
   baseUrlEnv: "MIMO_BASE_URL",
   envKeys: ["MIMO_API_KEY"],
   defaultModel: "mimo-v2.6-pro",

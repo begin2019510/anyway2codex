@@ -38,6 +38,19 @@ export interface Conversation {
 
 let db: Database.Database | null = null;
 
+const SECRET_PATTERNS: Array<[RegExp, string]> = [
+  [/\b(?:sk|tp)-[A-Za-z0-9._-]{8,}\b/g, "$1-***"],
+  [/\b(?:Bearer|Authorization)\s*[:=]?\s*[A-Za-z0-9._~+/-]+=*/gi, "$1 ***"],
+  [/\b(OPENAI_API_KEY|MIMO_API_KEY|DEEPSEEK_API_KEY|QWEN_API_KEY|ZHIPU_API_KEY|KIMI_API_KEY|API_KEY)\b(\s*[:=]\s*"?)[^\s",}]+/gi, "$1$2***"],
+];
+
+function redactSecrets(value: string | null | undefined): string | null {
+  if (value == null) return null;
+  let out = value;
+  for (const [pattern, replacement] of SECRET_PATTERNS) out = out.replace(pattern, replacement);
+  return out;
+}
+
 export function initLogs(database: Database.Database) {
   db = database;
 }
@@ -51,9 +64,9 @@ export function insertLog(log: Omit<ChatLog, "id">) {
     log.ts, log.provider_id, log.client_model, log.upstream_model, log.endpoint,
     log.status_code, log.duration_ms, log.prompt_tokens ?? null,
     log.completion_tokens ?? null, log.total_tokens ?? null, log.stream,
-    log.error_code ?? null, log.error_snippet ?? null,
-    log.user_message ?? null, log.assistant_response ?? null,
-    log.request_body ?? null, log.response_body ?? null, log.tool_call_count ?? null,
+    log.error_code ?? null, redactSecrets(log.error_snippet),
+    redactSecrets(log.user_message), redactSecrets(log.assistant_response),
+    redactSecrets(log.request_body), redactSecrets(log.response_body), log.tool_call_count ?? null,
     log.thread_id ?? null, log.turn_id ?? null,
   );
 }

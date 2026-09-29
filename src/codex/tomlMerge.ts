@@ -10,6 +10,10 @@ export interface TomlPatch {
   providerBlock: string;
 }
 
+export interface TomlMergeOptions {
+  removeRootKeys?: string[];
+}
+
 function trimBlankEdges(lines: string[]): string[] {
   let start = 0;
   let end = lines.length;
@@ -45,7 +49,11 @@ function managedBlock(patch: TomlPatch): string[] {
 }
 
 // Merge patch into existing config.toml content
-export function mergeCodexProviderToml(existing: string | null, patch: TomlPatch): string {
+export function mergeCodexProviderToml(
+  existing: string | null,
+  patch: TomlPatch,
+  options: TomlMergeOptions = {},
+): string {
   const managed = managedBlock(patch);
   if (!existing || existing.trim() === "") {
     return [...managed, "", patch.providerBlock.trimEnd()].join("\n") + "\n";
@@ -55,12 +63,13 @@ export function mergeCodexProviderToml(existing: string | null, patch: TomlPatch
   if (firstHeader === -1) firstHeader = lines.length;
   const rootLines = lines.slice(0, firstHeader);
   const sectionLines = lines.slice(firstHeader);
-  const managedRe = new RegExp("^\\s*(" + MANAGED_ROOT_KEYS.join("|") + ")\\s*=");
+  const managedKeys = [...new Set([...MANAGED_ROOT_KEYS, ...(options.removeRootKeys || [])])];
+  const managedRe = new RegExp("^\\s*(" + managedKeys.join("|") + ")\\s*=");
   const keptRoot = trimBlankEdges(rootLines.filter((l) => !managedRe.test(l)));
   const cleanedSections = trimBlankEdges(removeProviderTable(sectionLines, patch.providerKey));
   const out = [...managed];
   if (keptRoot.length) out.push("", ...keptRoot);
   if (cleanedSections.length) out.push("", ...cleanedSections);
-  out.push("", patch.providerBlock.trimEnd());
+  if (patch.providerBlock.trim()) out.push("", patch.providerBlock.trimEnd());
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
 }

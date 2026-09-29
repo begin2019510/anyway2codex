@@ -36,13 +36,29 @@ function normalizeQwenBody(chat: ChatRequest): void {
   }
   // Drop tool_choice "auto" (it's the default)
   if (chat.tool_choice === "auto") delete chat.tool_choice;
+  // Qwen: map reasoning_effort to qwen supported values (low/medium/xhigh)
+  const eff = chat.reasoning_effort;
+  if (eff) {
+    if (eff === "minimal" || eff === "low") chat.reasoning_effort = "low";
+    else if (eff === "medium") chat.reasoning_effort = "medium";
+    else if (eff === "high" || eff === "xhigh" || eff === "max") chat.reasoning_effort = "xhigh";
+    else delete chat.reasoning_effort;
+  }
+  // Qwen: set enable_thinking based on thinking status
+  if (chat.thinking?.type === "disabled") {
+    (chat as any).enable_thinking = false;
+    delete chat.thinking;
+  } else {
+    (chat as any).enable_thinking = true;
+    delete chat.thinking;
+  }
 }
 
 export const qwen: Provider = {
   id: "qwen",
   shortcut: "qwen",
   displayName: "Tongyi Qwen (Alibaba)",
-  defaultBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  defaultBaseUrl: "https://maas.qianwenaiapi.com/compatible-mode/v1",
   baseUrlEnv: "QWEN_BASE_URL",
   envKeys: ["DASHSCOPE_API_KEY", "QWEN_API_KEY"],
   defaultModel: "qwen3.8-max",

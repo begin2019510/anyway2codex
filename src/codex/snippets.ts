@@ -32,7 +32,6 @@ export function buildProviderTomlPatch(target: SnippetTarget, hostPort: string) 
 }
 
 export function buildCcSwitchFiles(target: SnippetTarget, hostPort: string) {
-  const authJson = JSON.stringify({ OPENAI_API_KEY: "anyway2codex-local" }, null, 2);
   const configToml = [
     'model_provider = "' + target.providerKey + '"',
     'model = "' + target.modelId + '"',
@@ -45,5 +44,5 @@ export function buildCcSwitchFiles(target: SnippetTarget, hostPort: string) {
     "request_max_retries = 1",
     "",
   ].join("\n");
-  return { authJson, configToml };
+  return { configToml };
 }

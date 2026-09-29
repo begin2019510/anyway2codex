@@ -15,10 +15,54 @@ export function getDb(dataDir: string): Database.Database {
   _db = new Database(dbPath);
   _db.pragma("journal_mode = WAL");
   migrate(_db);
+  ensureLogColumns(_db);
+  ensureLogRedactionTriggers(_db);
   initLogs(_db);
   initSettings(_db);
   log.info("database initialized: " + dbPath);
   return _db;
+}
+
+function ensureLogRedactionTriggers(db: Database.Database) {
+  const tokenLength = "CAST(COALESCE((SELECT value FROM settings WHERE key = 'key_length_mimo'), '0') AS INTEGER)";
+  const redact = (column: string) => [
+    "CASE",
+    "WHEN instr(NEW." + column + ", 'tp-') > 0 AND " + tokenLength + " > 0 THEN",
+    "substr(NEW." + column + ", 1, instr(NEW." + column + ", 'tp-') - 1)",
+    "|| '[REDACTED]'",
+    "|| substr(NEW." + column + ", instr(NEW." + column + ", 'tp-') + " + tokenLength + ")",
+    "ELSE NEW." + column,
+    "END",
+  ].join(" ");
+  db.exec(
+    "DROP TRIGGER IF EXISTS redact_chat_logs_insert; " +
+    "CREATE TRIGGER redact_chat_logs_insert AFTER INSERT ON chat_logs BEGIN " +
+    "UPDATE chat_logs SET " +
+    "error_snippet = " + redact("error_snippet") + ", " +
+    "user_message = " + redact("user_message") + ", " +
+    "assistant_response = " + redact("assistant_response") + ", " +
+    "request_body = " + redact("request_body") + ", " +
+    "response_body = " + redact("response_body") + " " +
+    "WHERE id = NEW.id; END;"
+  );
+}
+
+function ensureLogColumns(db: Database.Database) {
+  const existing = new Set(
+    (db.prepare("PRAGMA table_info(chat_logs)").all() as any[]).map((row) => row.name),
+  );
+  const columns: Array<[string, string]> = [
+    ["user_message", "TEXT"],
+    ["assistant_response", "TEXT"],
+    ["request_body", "TEXT"],
+    ["response_body", "TEXT"],
+    ["tool_call_count", "INTEGER"],
+    ["thread_id", "TEXT"],
+    ["turn_id", "TEXT"],
+  ];
+  for (const [name, type] of columns) {
+    if (!existing.has(name)) db.exec("ALTER TABLE chat_logs ADD COLUMN " + name + " " + type);
+  }
 }
 
 function migrate(db: Database.Database) {

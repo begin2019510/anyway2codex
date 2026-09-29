@@ -24,6 +24,7 @@ export function handleKeyRoutes(action: string, _dataDir: string, body?: any): a
     if (!providerId || !apiKey) return { success: false, message: "providerId and apiKey required" };
     const enc = encrypt(apiKey, MASTER_KEY);
     setSetting("key_" + providerId, JSON.stringify({ ...enc, updatedAt: Date.now() }));
+    setSetting("key_length_" + providerId, String(apiKey.length));
     return { success: true, message: "Key saved for " + providerId };
   }
   return { success: false, message: "unknown action" };

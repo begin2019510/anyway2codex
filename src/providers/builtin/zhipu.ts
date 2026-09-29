@@ -13,6 +13,29 @@ const BUILTIN_MODELS: ModelInfo[] = [
 
 // GLM: drop tool_choice auto, merge system messages, drop strict null
 function normalizeGlmBody(chat: ChatRequest): void {
+  const isGlm53 = chat.model === "glm-5.3" || chat.model === "glm-5.3-flash";
+  // GLM: thinking type. GLM-5.3/5.3-flash cannot be disabled.
+  if (chat.thinking?.type === "disabled" && !isGlm53) {
+    chat.thinking = { type: "disabled" };
+  } else {
+    chat.thinking = { type: "enabled" };
+  }
+  // GLM: map reasoning_effort to model supported values.
+  const eff = chat.reasoning_effort;
+  if (isGlm53) {
+    // GLM-5.3: only max/high/low accepted
+    if (eff === "minimal") chat.reasoning_effort = "low";
+    else if (eff === "medium") chat.reasoning_effort = "high";
+    else if (eff === "xhigh" || eff === "max") chat.reasoning_effort = "max";
+    else if (eff === "none") chat.reasoning_effort = "low";
+    else if (eff === "low" || eff === "high") { /* keep */ }
+    else delete chat.reasoning_effort;
+  } else {
+    // GLM-5.2 and below: supports none/minimal/low/medium/high/xhigh/max
+    if (eff === "minimal") chat.reasoning_effort = "low";
+    else if (eff === "xhigh" || eff === "max") chat.reasoning_effort = "max";
+    else if (!eff || !["low","medium","high","none"].includes(eff)) delete chat.reasoning_effort;
+  }
   if (chat.tool_choice === "auto") delete chat.tool_choice;
   if (Array.isArray(chat.tools)) {
     for (const t of chat.tools) {

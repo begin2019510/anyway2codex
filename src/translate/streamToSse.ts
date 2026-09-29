@@ -26,7 +26,7 @@ class StreamState {
     namespaceMap;
     constructor(req, opts = {}) {
         this.req = req;
-        this.model = req.model;
+        this.model = opts.model || req.model;
         this.exposeReasoning = opts.exposeReasoning;
         this.namespaceMap = opts.namespaceMap;
         if (opts.extractInlineThink) {

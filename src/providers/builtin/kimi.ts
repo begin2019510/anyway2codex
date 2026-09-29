@@ -11,9 +11,19 @@ const BUILTIN_MODELS: ModelInfo[] = [
   { id: "kimi-k2.6", displayName: "Kimi K2.6", supportsImages: true, supportsReasoning: true, contextWindow: 256000, note: "Multimodal" }
 ];
 
-// Kimi: drop reasoning_effort (uses thinking:{enabled/disabled} instead), drop tool_choice auto
+// Kimi: K3 uses top-level reasoning_effort (low/high/max, default max).
+// K2.6/K2.7 do NOT support reasoning_effort - drop it for those.
 function normalizeKimiBody(chat: ChatRequest): void {
-  delete chat.reasoning_effort;
+  const isK3 = chat.model?.startsWith("kimi-k3");
+  if (isK3) {
+    const eff = chat.reasoning_effort;
+    if (eff === "none" || eff === "minimal") delete chat.reasoning_effort;
+    else if (eff === "low") chat.reasoning_effort = "low";
+    else if (eff === "medium" || eff === "high") chat.reasoning_effort = "high";
+    else if (eff === "max" || eff === "xhigh") chat.reasoning_effort = "max";
+  } else {
+    delete chat.reasoning_effort;
+  }
   if (chat.tool_choice === "auto") delete chat.tool_choice;
 }
 

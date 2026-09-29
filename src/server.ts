@@ -4,7 +4,12 @@ import { respToResponses } from "./translate/respToResponses.js";
 import { pipeChatStreamToResponses } from "./translate/streamToSse.js";
 import { iterChatStreamChunks } from "./upstream/chatStream.js";
 import { callOpenAICompat, callResponsesPassthrough, UpstreamError } from "./upstream/client.js";
-import { selectProvider } from "./router.js";
+import { applyVisionFallback, selectProviderCandidates, type RouteCandidate } from "./router.js";
+import { shouldFallback, fallbackLogSnippet } from "./fallback.js";
+import { resolveFallbackSettings } from "./fallbackSettings.js";
+import { resolveRoutingSettings } from "./routingSettings.js";
+import { resolveVisionFallbackSettings } from "./visionFallbackSettings.js";
+import { chatRequestContainsImages, responsesRequestContainsImages } from "./translate/imageDetection.js";
 import { makeServerResponseSink } from "./util/sse.js";
 import { log } from "./util/log.js";
 import type { AppConfig } from "./config.js";
@@ -80,21 +85,51 @@ function errorEnvelope(status: number, code: string, message: string) {
   return { error: { type: "error", code, message, param: null } };
 }
 
-function loadApiKeys(): Record<string, { baseUrl: string; apiKey: string }> {
+function logAttemptFailure(
+  route: RouteCandidate,
+  body: unknown,
+  endpoint: string,
+  startTime: number,
+  stream: boolean,
+  err: unknown,
+  pending: boolean,
+) {
+  const status = err instanceof UpstreamError ? err.status : 500;
+  const code = err instanceof UpstreamError ? err.code : "internal_error";
+  insertLog({
+    ts: startTime,
+    provider_id: route.provider.id,
+    client_model: (body as any)?.model ?? "",
+    upstream_model: route.upstreamModel,
+    endpoint,
+    status_code: status,
+    duration_ms: Date.now() - startTime,
+    stream: stream ? 1 : 0,
+    error_code: code,
+    error_snippet: fallbackLogSnippet(err, pending).substring(0, 2000),
+    request_body: JSON.stringify(body).substring(0, 2000000),
+  });
+}
+
+
+function loadApiKeys(cfg: AppConfig): Record<string, { baseUrl: string; apiKey: string }> {
   const result: Record<string, { baseUrl: string; apiKey: string }> = {};
   for (const p of Object.values(PROVIDERS)) {
-    let apiKey = "";
-    for (const envKey of p.envKeys) {
-      const val = process.env[envKey];
-      if (val) { apiKey = val; break; }
-    }
+    const configured = cfg.providers[p.id];
+    let apiKey = configured?.apiKey || "";
     if (!apiKey) {
-      const dbKey = getApiKey(p.id);
-      if (dbKey) apiKey = dbKey;
+      for (const envKey of p.envKeys) {
+        const val = process.env[envKey];
+        if (val) { apiKey = val; break; }
+      }
     }
+    if (!apiKey) apiKey = getApiKey(p.id) || "";
     if (apiKey) {
       const inferred = p.inferBaseUrlFromKey(apiKey);
-      result[p.id] = { baseUrl: inferred ?? p.defaultBaseUrl, apiKey };
+      result[p.id] = {
+        baseUrl: configured?.baseUrl || process.env[p.baseUrlEnv] || inferred || p.defaultBaseUrl,
+        apiKey,
+      };
     }
   }
   return result;
@@ -163,145 +198,280 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
     return;
   }
 
-  const apiKeys = loadApiKeys();
-  const route = selectProvider(body, apiKeys, cfg.defaultProviderId);
-  if (!route) {
+  const apiKeys = loadApiKeys(cfg);
+  const fallback = resolveFallbackSettings({ enabled: cfg.fallbackEnabled, providerId: cfg.fallbackProviderId, model: cfg.fallbackModel });
+  const routing = resolveRoutingSettings({
+    enabled: cfg.proxyControlsModel,
+    providerId: cfg.primaryProviderId,
+    model: cfg.primaryModel,
+  });
+  const baseRoutes = selectProviderCandidates(
+    body,
+    apiKeys,
+    cfg.defaultProviderId,
+    fallback.enabled ? fallback.providerId : undefined,
+    fallback.enabled ? fallback.model : undefined,
+    routing,
+  );
+  const visionFallback = resolveVisionFallbackSettings({
+    enabled: cfg.visionFallbackEnabled,
+    providerId: cfg.visionFallbackProviderId,
+    model: cfg.visionFallbackModel,
+  });
+  const routes = applyVisionFallback(
+    baseRoutes,
+    apiKeys,
+    visionFallback,
+    responsesRequestContainsImages(body),
+  );
+  if (!routes.length) {
     sendJson(res, 400, errorEnvelope(400, "invalid_model", "No provider found for model: " + body.model + ". Configure an API key in the web panel."));
     return;
   }
   const startTime = Date.now();
-  log.info("request -> " + route.provider.displayName + " model=" + route.upstreamModel + (body.stream ? " stream" : "") + (route.provider.wireApi === "responses" ? " (passthrough)" : ""));
+  let route = routes[0];
+  if (route.visionFallback) {
+    log.info(
+      "image fallback applied: provider=" + route.provider.id +
+      " model=" + route.upstreamModel +
+      " client_model=" + body.model,
+    );
+  }
+  log.info("request -> " + route.provider.displayName + " model=" + route.upstreamModel + (body.stream ? " stream" : "") + (route.provider.wireApi === "responses" ? " (passthrough)" : "") + (routes.length > 1 ? " fallback=" + routes[1].provider.id + ":" + routes[1].upstreamModel : ""));
 
-  // Responses API passthrough: forward directly without translation
+  // Responses API passthrough: forward directly without translation.
   if (route.provider.wireApi === "responses") {
     const ac = new AbortController();
     req.on("close", () => ac.abort());
-    // Flush SSE headers + keepalive BEFORE upstream call (prevents idle timeout)
-    res.statusCode = 200;
-    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-    res.setHeader("Cache-Control", "no-cache, no-transform");
-    res.setHeader("Connection", "keep-alive");
-    if (typeof res.flushHeaders === "function") res.flushHeaders();
-    const keepalive = setInterval(() => { try { res.write(": keepalive\n\n"); } catch {} }, 15000);
-    res.on("close", () => clearInterval(keepalive));
-    try {
-      const upstreamRes = await callResponsesPassthrough(
-        { baseUrl: route.baseUrl, apiKey: route.apiKey },
-        body as any,
-        ac.signal
-      );
-      // Pipe upstream SSE bytes directly to client (NO second writeHead)
-      if (upstreamRes.body && typeof upstreamRes.body.getReader === "function") {
-        const reader = upstreamRes.body.getReader();
-        // Body read timeout: 120s of no data = abort
-        const bodyTimeoutAc = new AbortController();
-        const bodyTimeoutId = setTimeout(() => bodyTimeoutAc.abort(), 120_000);
-        const mergedSignal = AbortSignal.any([ac.signal, bodyTimeoutAc.signal]);
-        mergedSignal.addEventListener("abort", () => {
-          clearTimeout(bodyTimeoutId);
-          try { upstreamRes.body?.cancel(); } catch {}
-          try { reader.cancel(); } catch {}
-        }, { once: true });
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            if (value && value.length > 0) {
-              try { res.write(Buffer.from(value)); } catch {}
-            }
-          }
-        } catch (err) {
-          log.error("passthrough stream read error: " + (err as Error).message);
-        } finally {
-          clearTimeout(bodyTimeoutId);
-          clearInterval(keepalive);
-          try { reader.cancel(); } catch {}
-          try { res.end(); } catch {}
+    const isStream = !!body.stream;
+    let keepalive: NodeJS.Timeout | null = null;
+    if (isStream) {
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader("Connection", "keep-alive");
+      if (typeof res.flushHeaders === "function") res.flushHeaders();
+      keepalive = setInterval(() => { try { res.write(": keepalive\n\n"); } catch {} }, 15000);
+      res.on("close", () => { if (keepalive) clearInterval(keepalive); });
+    }
+
+    let upstreamRes: Response | undefined;
+    for (let attemptIndex = 0; attemptIndex < routes.length; attemptIndex++) {
+      route = routes[attemptIndex];
+      try {
+        const forwardBody = {
+          ...(body as any),
+          model: route.upstreamModel,
+          stream: isStream,
+        };
+        upstreamRes = await callResponsesPassthrough(
+          { baseUrl: route.baseUrl, apiKey: route.apiKey },
+          forwardBody,
+          ac.signal,
+        );
+        break;
+      } catch (err) {
+        const pending = attemptIndex < routes.length - 1 && shouldFallback(err, ac.signal.aborted);
+        logAttemptFailure(route, body, "/v1/responses", startTime, isStream, err, pending);
+        if (pending) {
+          log.warn("fallback: " + route.provider.id + " failed, trying " + routes[attemptIndex + 1].provider.id + ":" + routes[attemptIndex + 1].upstreamModel);
+          continue;
         }
-      } else {
-        clearInterval(keepalive);
+        break;
+      }
+    }
+
+    if (!upstreamRes) {
+      if (keepalive) clearInterval(keepalive);
+      const lastErr = new Error("upstream request failed");
+      const status = 502;
+      if (isStream) {
+        if (!res.headersSent) {
+          res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+          res.setHeader("Cache-Control", "no-cache");
+          if (typeof res.flushHeaders === "function") res.flushHeaders();
+        }
+        try {
+          res.write("event: response.failed\ndata: " + JSON.stringify({
+            type: "response.failed",
+            sequence_number: 9999,
+            response: {
+              id: "resp_failed",
+              object: "response",
+              created_at: Math.floor(Date.now() / 1000),
+              status: "failed",
+              model: route.upstreamModel || body.model,
+              output: [],
+              error: { type: "upstream_error", code: "upstream_unreachable", message: lastErr.message },
+            },
+          }) + "\n\n");
+          res.end();
+        } catch {}
+      } else if (!res.headersSent) {
+        sendJson(res, status, errorEnvelope(status, "upstream_unreachable", lastErr.message));
+      }
+      return;
+    }
+
+    if (!isStream) {
+      try {
+        const json = await upstreamRes.json();
+        if (json && typeof json === "object") json.model = route.upstreamModel;
+        insertLog({
+          ts: startTime,
+          provider_id: route.provider.id,
+          client_model: body.model,
+          upstream_model: route.upstreamModel,
+          endpoint: "/v1/responses",
+          status_code: 200,
+          duration_ms: Date.now() - startTime,
+          stream: 0,
+          request_body: JSON.stringify(body).substring(0, 2000000),
+          response_body: JSON.stringify(json).substring(0, 2000000),
+          ...extractThreadInfo(body),
+        });
+        sendJson(res, 200, json);
+      } catch (err) {
+        const status = err instanceof UpstreamError ? err.status : 502;
+        const code = err instanceof UpstreamError ? err.code : "invalid_upstream_response";
+        insertLog({
+          ts: startTime,
+          provider_id: route.provider.id,
+          client_model: body.model,
+          upstream_model: route.upstreamModel,
+          endpoint: "/v1/responses",
+          status_code: status,
+          duration_ms: Date.now() - startTime,
+          stream: 0,
+          error_code: code,
+          error_snippet: (err as Error).message?.substring(0, 2000),
+          request_body: JSON.stringify(body).substring(0, 2000000),
+          ...extractThreadInfo(body),
+        });
+        if (!res.headersSent) sendJson(res, status, errorEnvelope(status, code, (err as Error).message));
+      }
+      return;
+    }
+
+    if (keepalive) clearInterval(keepalive);
+    if (upstreamRes.body && typeof upstreamRes.body.getReader === "function") {
+      const reader = upstreamRes.body.getReader();
+      const bodyTimeoutAc = new AbortController();
+      const bodyTimeoutId = setTimeout(() => bodyTimeoutAc.abort(), 120_000);
+      const mergedSignal = AbortSignal.any([ac.signal, bodyTimeoutAc.signal]);
+      let streamError: unknown = null;
+      mergedSignal.addEventListener("abort", () => {
+        clearTimeout(bodyTimeoutId);
+        try { upstreamRes.body?.cancel(); } catch {}
+        try { reader.cancel(); } catch {}
+      }, { once: true });
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value && value.length > 0) {
+            try { res.write(Buffer.from(value)); } catch {}
+          }
+        }
+      } catch (err) {
+        streamError = err;
+        log.error("passthrough stream read error: " + (err as Error).message);
+      } finally {
+        clearTimeout(bodyTimeoutId);
+        try { reader.cancel(); } catch {}
         try { res.end(); } catch {}
       }
       insertLog({
-        ts: startTime, provider_id: route.provider.id, client_model: body.model,
-        upstream_model: route.upstreamModel, endpoint: "/v1/responses",
-        status_code: upstreamRes.status, duration_ms: Date.now() - startTime, stream: body.stream ? 1 : 0,
+        ts: startTime,
+        provider_id: route.provider.id,
+        client_model: body.model,
+        upstream_model: route.upstreamModel,
+        endpoint: "/v1/responses",
+        status_code: streamError ? 500 : 200,
+        duration_ms: Date.now() - startTime,
+        stream: 1,
         request_body: JSON.stringify(body).substring(0, 2000000),
-...extractThreadInfo(body),
-});
-    } catch (err) {
-      const status = err instanceof UpstreamError ? err.status : 500;
-      const code = err instanceof UpstreamError ? err.code : "internal_error";
-      insertLog({
-        ts: startTime, provider_id: route.provider.id, client_model: body.model,
-        upstream_model: route.upstreamModel, endpoint: "/v1/responses",
-        status_code: status, duration_ms: Date.now() - startTime, stream: body.stream ? 1 : 0,
-        error_code: code,
-        error_snippet: (err as Error).message?.substring(0, 2000),
-        request_body: JSON.stringify(body).substring(0, 2000000),
-...extractThreadInfo(body),
-});
-      if (!res.headersSent) {
-        sendJson(res, status, errorEnvelope(status, code, (err as Error).message));
-      }
+        error_code: streamError ? "stream_error" : undefined,
+        error_snippet: streamError ? (streamError as Error).message?.substring(0, 2000) : undefined,
+        ...extractThreadInfo(body),
+      });
+    } else {
+      try { res.end(); } catch {}
     }
     return;
   }
 
-  const resolvedModel = route.provider.resolveModel(route.upstreamModel);
-  const ctx: PreprocessCtx = {
-    upstreamModel: route.upstreamModel,
-    dataDir: cfg.dataDir,
-    disableThinking: cfg.disableThinking,
-    forceHighEffort: false,
-    webSearchEnabled: cfg.webSearch,
-    supportsImages: resolvedModel?.supportsImages ?? false,
+  const makeAttempt = async (candidate: RouteCandidate) => {
+    const resolvedModel = candidate.provider.resolveModel(candidate.upstreamModel);
+    const ctx: PreprocessCtx = {
+      upstreamModel: candidate.upstreamModel,
+      dataDir: cfg.dataDir,
+      disableThinking: cfg.disableThinking,
+      forceHighEffort: false,
+      webSearchEnabled: cfg.webSearch,
+      supportsImages: resolvedModel?.supportsImages ?? false,
+    };
+    const chatBody = candidate.provider.preprocessResponses(body, ctx);
+    console.error("[UPSTREAM REQ] provider=" + candidate.provider.id + " model=" + (chatBody as any).model + " msgs=" + (chatBody as any).messages?.length + " tools=" + ((chatBody as any).tools?.length ?? 0) + " stream=" + (chatBody as any).stream + " reasoning_effort=" + (chatBody as any).reasoning_effort);
+    const autoCompact = resolveAutoCompact(cfg, resolvedModel?.contextWindow);
+    if (autoCompact.enabled && autoCompact.atTokens != null && (chatBody as any).messages) {
+      const callChatForSummary = async (summaryReq: any) => {
+        const summaryResponse = await callOpenAICompat(
+          { baseUrl: candidate.baseUrl, apiKey: candidate.apiKey },
+          { ...summaryReq, model: candidate.upstreamModel },
+          new AbortController().signal,
+        );
+        const summaryJson = await summaryResponse.json() as any;
+        return summaryJson.choices?.[0]?.message?.content ?? "";
+      };
+      await maybeCompactChat(chatBody as any, { atTokens: autoCompact.atTokens, callChat: callChatForSummary });
+    }
+    return { resolvedModel, chatBody };
   };
 
-  const chatBody = route.provider.preprocessResponses(body, ctx);
-  console.error("[UPSTREAM REQ] model=" + (chatBody as any).model + " msgs=" + (chatBody as any).messages?.length + " tools=" + ((chatBody as any).tools?.length ?? 0) + " stream=" + (chatBody as any).stream + " reasoning_effort=" + (chatBody as any).reasoning_effort);
-  // Auto-compact: summarize old messages when context gets too long
-  const autoCompact = resolveAutoCompact(cfg, resolvedModel?.contextWindow);
-  if (autoCompact.enabled && autoCompact.atTokens != null && (chatBody as any).messages) {
-    const callChatForSummary = async (summaryReq: any) => {
-      const r = await callOpenAICompat(
-        { baseUrl: route.baseUrl, apiKey: route.apiKey },
-        { ...summaryReq, model: route.upstreamModel },
-        new AbortController().signal
-      );
-      const j = await r.json() as any;
-      return j.choices?.[0]?.message?.content ?? "";
-    };
-    await maybeCompactChat(chatBody as any, { atTokens: autoCompact.atTokens, callChat: callChatForSummary });
-  }
-
+  const ac = new AbortController();
+  req.on("close", () => ac.abort());
 
   if (body.stream) {
-    // Create sink first (it flushes headers). Start keepalive after sink.
     const sink = makeServerResponseSink(res);
     const KEEPALIVE_MS = 15000;
     const keepalive = setInterval(() => sink.comment("keepalive"), KEEPALIVE_MS);
     res.on("close", () => clearInterval(keepalive));
 
-    const ac = new AbortController();
-    req.on("close", () => ac.abort());
+    let upstreamRes: Response | undefined;
+    let upstreamAttempt: any = null;
+    let lastError: unknown = null;
+    for (let attemptIndex = 0; attemptIndex < routes.length; attemptIndex++) {
+      route = routes[attemptIndex];
+      try {
+        upstreamAttempt = await makeAttempt(route);
+        upstreamRes = await callOpenAICompat({
+          baseUrl: route.baseUrl,
+          apiKey: route.apiKey,
+          contextOverflowMode: "friendly",
+          modelInfo: upstreamAttempt.resolvedModel
+            ? { id: route.upstreamModel, contextWindow: upstreamAttempt.resolvedModel.contextWindow }
+            : { id: route.upstreamModel },
+        }, upstreamAttempt.chatBody as any, ac.signal);
+        lastError = null;
+        break;
+      } catch (err) {
+        lastError = err;
+        const pending = attemptIndex < routes.length - 1 && shouldFallback(err, ac.signal.aborted);
+        logAttemptFailure(route, body, "/v1/responses", startTime, true, err, pending);
+        if (pending) {
+          log.warn("fallback: " + route.provider.id + " failed, trying " + routes[attemptIndex + 1].provider.id + ":" + routes[attemptIndex + 1].upstreamModel);
+          continue;
+        }
+        break;
+      }
+    }
 
-    let upstreamRes;
-    try {
-      upstreamRes = await callOpenAICompat({
-        baseUrl: route.baseUrl,
-        apiKey: route.apiKey,
-        contextOverflowMode: "friendly",
-        modelInfo: resolvedModel ? { id: route.upstreamModel, contextWindow: resolvedModel.contextWindow } : { id: route.upstreamModel },
-      }, chatBody as any, ac.signal);
-    } catch (err) {
+    if (!upstreamRes) {
       clearInterval(keepalive);
-      const isUpstream = err instanceof UpstreamError;
-      const status = isUpstream ? err.status : 500;
-      const code = isUpstream ? err.code : "internal_error";
-      if (!isUpstream) log.error("stream pre-stream error: " + (err as Error).message);
+      const status = lastError instanceof UpstreamError ? lastError.status : 502;
+      const code = lastError instanceof UpstreamError ? lastError.code : "upstream_unreachable";
       if (!sink.closed()) {
-        // Codex expects response.failed (not raw error) as terminal SSE event
         sink.write("response.failed", {
           type: "response.failed",
           sequence_number: 9999,
@@ -310,22 +480,13 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
             object: "response",
             created_at: Math.floor(Date.now() / 1000),
             status: "failed",
-            model: body.model,
+            model: route.upstreamModel || body.model,
             output: [],
-            error: { type: "upstream_error", code, message: (err as Error).message },
+            error: { type: "upstream_error", code, message: (lastError as Error)?.message ?? "All provider attempts failed" },
           },
         });
         sink.end();
       }
-      insertLog({
-        ts: startTime, provider_id: route.provider.id, client_model: body.model,
-        upstream_model: route.upstreamModel, endpoint: "/v1/responses",
-        status_code: status, duration_ms: Date.now() - startTime, stream: 1,
-        error_code: code,
-        error_snippet: (err as Error).message?.substring(0, 2000),
-        request_body: JSON.stringify(body).substring(0, 2000000),
-...extractThreadInfo(body),
-});
       return;
     }
 
@@ -333,7 +494,10 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
     let pipeResult: any;
     try {
       const rawChunks = iterChatStreamChunks(upstreamRes, ac.signal);
-      pipeResult = await pipeChatStreamToResponses(sink, { chunks: rawChunks }, body, { exposeReasoning: true });
+      pipeResult = await pipeChatStreamToResponses(sink, { chunks: rawChunks }, body, {
+        exposeReasoning: true,
+        model: route.upstreamModel,
+      });
     } catch (err) {
       streamError = err;
       log.error("stream mid-stream error: " + (err as Error).message);
@@ -342,9 +506,12 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
           type: "response.failed",
           sequence_number: 9999,
           response: {
-            id: "resp_failed", object: "response",
+            id: "resp_failed",
+            object: "response",
             created_at: Math.floor(Date.now() / 1000),
-            status: "failed", model: body.model, output: [],
+            status: "failed",
+            model: route.upstreamModel || body.model,
+            output: [],
             error: { type: "upstream_error", message: (err as Error).message },
           },
         });
@@ -355,9 +522,14 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
       const userMsg2 = extractUserMessage(body.input);
       const u = pipeResult?.usage;
       insertLog({
-        ts: startTime, provider_id: route.provider.id, client_model: body.model,
-        upstream_model: route.upstreamModel, endpoint: "/v1/responses",
-        status_code: streamError ? 500 : 200, duration_ms: Date.now() - startTime, stream: 1,
+        ts: startTime,
+        provider_id: route.provider.id,
+        client_model: body.model,
+        upstream_model: route.upstreamModel,
+        endpoint: "/v1/responses",
+        status_code: streamError ? 500 : 200,
+        duration_ms: Date.now() - startTime,
+        stream: 1,
         user_message: userMsg2,
         assistant_response: streamError ? undefined : extractAssistantResponse((pipeResult?.response as any)?.output ?? []).substring(0, 2000000),
         request_body: JSON.stringify(body).substring(0, 2000000),
@@ -368,48 +540,91 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
         tool_call_count: pipeResult?.toolCallCount ?? null,
         error_code: streamError ? "stream_error" : undefined,
         error_snippet: streamError ? (streamError as Error).message : undefined,
+        ...extractThreadInfo(body),
       });
     }
-  } else {
+    return;
+  }
+
+  let nonStreamJson: any = null;
+  let nonStreamAttempt: any = null;
+  let nonStreamError: unknown = null;
+  for (let attemptIndex = 0; attemptIndex < routes.length; attemptIndex++) {
+    route = routes[attemptIndex];
     try {
-      const response = await callOpenAICompat({ baseUrl: route.baseUrl, apiKey: route.apiKey, contextOverflowMode: "friendly", modelInfo: resolvedModel ? { id: route.upstreamModel, contextWindow: resolvedModel.contextWindow } : { id: route.upstreamModel } }, { ...chatBody, stream: false } as any, new AbortController().signal);
-      const json = await response.json() as any;
-      const translated = respToResponses(json, body);
-      const userMsg = extractUserMessage(body.input);
-      const asstResp = extractAssistantResponse((translated as any).output);
-      insertLog({
-        ts: startTime, provider_id: route.provider.id, client_model: body.model,
-        upstream_model: route.upstreamModel, endpoint: "/v1/responses",
-        status_code: 200, duration_ms: Date.now() - startTime, stream: 0,
-        prompt_tokens: (json as any).usage?.prompt_tokens,
-        completion_tokens: (json as any).usage?.completion_tokens,
-        total_tokens: (json as any).usage?.total_tokens,
-        user_message: userMsg,
-        assistant_response: asstResp,
-        request_body: JSON.stringify(body).substring(0, 2000000),
-        response_body: JSON.stringify(json).substring(0, 2000000),
-...extractThreadInfo(body),
-});
-      sendJson(res, 200, translated);
+      nonStreamAttempt = await makeAttempt(route);
+      const response = await callOpenAICompat({
+        baseUrl: route.baseUrl,
+        apiKey: route.apiKey,
+        contextOverflowMode: "friendly",
+        modelInfo: nonStreamAttempt.resolvedModel
+          ? { id: route.upstreamModel, contextWindow: nonStreamAttempt.resolvedModel.contextWindow }
+          : { id: route.upstreamModel },
+      }, { ...nonStreamAttempt.chatBody, stream: false } as any, ac.signal);
+      nonStreamJson = await response.json();
+      nonStreamError = null;
+      break;
     } catch (err) {
-      const status = err instanceof UpstreamError ? err.status : 500;
-      const code = err instanceof UpstreamError ? err.code : "internal_error";
-      insertLog({
-        ts: startTime, provider_id: route.provider.id, client_model: body.model,
-        upstream_model: route.upstreamModel, endpoint: "/v1/responses",
-        status_code: status, duration_ms: Date.now() - startTime, stream: 0,
-        error_code: code,
-        error_snippet: (err as Error).message?.substring(0, 2000),
-        request_body: JSON.stringify(body).substring(0, 2000000),
-...extractThreadInfo(body),
-});
-      if (err instanceof UpstreamError) {
-        sendJson(res, err.status, errorEnvelope(err.status, err.code, err.message));
-      } else {
-        log.error("upstream error: " + (err as Error).message);
-        sendJson(res, 500, errorEnvelope(500, "internal_error", "proxy error: " + (err as Error).message));
+      nonStreamError = err;
+      const pending = attemptIndex < routes.length - 1 && shouldFallback(err, ac.signal.aborted);
+      logAttemptFailure(route, body, "/v1/responses", startTime, false, err, pending);
+      if (pending) {
+        log.warn("fallback: " + route.provider.id + " failed, trying " + routes[attemptIndex + 1].provider.id + ":" + routes[attemptIndex + 1].upstreamModel);
+        continue;
       }
+      break;
     }
+  }
+
+  if (nonStreamJson == null) {
+    const status = nonStreamError instanceof UpstreamError ? nonStreamError.status : 502;
+    const code = nonStreamError instanceof UpstreamError ? nonStreamError.code : "upstream_unreachable";
+    if (!res.headersSent) {
+      sendJson(res, status, errorEnvelope(status, code, (nonStreamError as Error)?.message ?? "All provider attempts failed"));
+    }
+    return;
+  }
+
+  try {
+    const translated = respToResponses(nonStreamJson, body, { model: route.upstreamModel });
+    const userMsg = extractUserMessage(body.input);
+    const asstResp = extractAssistantResponse((translated as any).output);
+    insertLog({
+      ts: startTime,
+      provider_id: route.provider.id,
+      client_model: body.model,
+      upstream_model: route.upstreamModel,
+      endpoint: "/v1/responses",
+      status_code: 200,
+      duration_ms: Date.now() - startTime,
+      stream: 0,
+      prompt_tokens: nonStreamJson?.usage?.prompt_tokens,
+      completion_tokens: nonStreamJson?.usage?.completion_tokens,
+      total_tokens: nonStreamJson?.usage?.total_tokens,
+      user_message: userMsg,
+      assistant_response: asstResp,
+      request_body: JSON.stringify(body).substring(0, 2000000),
+      response_body: JSON.stringify(nonStreamJson).substring(0, 2000000),
+      ...extractThreadInfo(body),
+    });
+    sendJson(res, 200, translated);
+  } catch (err) {
+    const status = 500;
+    insertLog({
+      ts: startTime,
+      provider_id: route.provider.id,
+      client_model: body.model,
+      upstream_model: route.upstreamModel,
+      endpoint: "/v1/responses",
+      status_code: status,
+      duration_ms: Date.now() - startTime,
+      stream: 0,
+      error_code: "response_translation_error",
+      error_snippet: (err as Error).message?.substring(0, 2000),
+      request_body: JSON.stringify(body).substring(0, 2000000),
+      ...extractThreadInfo(body),
+    });
+    if (!res.headersSent) sendJson(res, status, errorEnvelope(status, "response_translation_error", (err as Error).message));
   }
 }
 
@@ -425,53 +640,115 @@ function handleModels(_cfg: AppConfig, res: ServerResponse) {
 }
 
 async function handleChatPassthrough(cfg: AppConfig, req: IncomingMessage, res: ServerResponse, body: ChatRequest) {
-  const apiKeys = loadApiKeys();
-  const route = selectProvider(body, apiKeys, cfg.defaultProviderId);
-  if (!route) {
+  const apiKeys = loadApiKeys(cfg);
+  const fallback = resolveFallbackSettings({ enabled: cfg.fallbackEnabled, providerId: cfg.fallbackProviderId, model: cfg.fallbackModel });
+  const routing = resolveRoutingSettings({
+    enabled: cfg.proxyControlsModel,
+    providerId: cfg.primaryProviderId,
+    model: cfg.primaryModel,
+  });
+  const baseRoutes = selectProviderCandidates(
+    body,
+    apiKeys,
+    cfg.defaultProviderId,
+    fallback.enabled ? fallback.providerId : undefined,
+    fallback.enabled ? fallback.model : undefined,
+    routing,
+  );
+  const visionFallback = resolveVisionFallbackSettings({
+    enabled: cfg.visionFallbackEnabled,
+    providerId: cfg.visionFallbackProviderId,
+    model: cfg.visionFallbackModel,
+  });
+  const routes = applyVisionFallback(
+    baseRoutes,
+    apiKeys,
+    visionFallback,
+    chatRequestContainsImages(body),
+  );
+  if (!routes.length) {
     sendJson(res, 400, errorEnvelope(400, "invalid_model", "No provider found for model: " + body.model));
     return;
   }
+
   const startTime = Date.now();
-  const resolvedModel = route.provider.resolveModel(route.upstreamModel);
-  const ctx: PreprocessCtx = {
-    upstreamModel: route.upstreamModel,
-    dataDir: cfg.dataDir,
-    disableThinking: cfg.disableThinking,
-    forceHighEffort: false,
-    webSearchEnabled: cfg.webSearch,
-    supportsImages: resolvedModel?.supportsImages ?? false,
-  };
-  const chatBody = route.provider.preprocessChat(body, ctx);
-  // Auto-compact for chat passthrough
-  const chatAutoCompact = resolveAutoCompact(cfg, resolvedModel?.contextWindow);
-  if (chatAutoCompact.enabled && chatAutoCompact.atTokens != null && (chatBody as any).messages) {
-    const callChatSummary = async (summaryReq: any) => {
-      const r = await callOpenAICompat(
-        { baseUrl: route.baseUrl, apiKey: route.apiKey },
-        { ...summaryReq, model: route.upstreamModel },
-        new AbortController().signal
-      );
-      const j = await r.json() as any;
-      return j.choices?.[0]?.message?.content ?? "";
-    };
-    await maybeCompactChat(chatBody as any, { atTokens: chatAutoCompact.atTokens, callChat: callChatSummary });
-  }
-
-
   const ac = new AbortController();
   req.on("close", () => ac.abort());
-  // Flush SSE headers + keepalive BEFORE upstream call (prevents idle timeout)
   if (body.stream) {
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
     if (typeof res.flushHeaders === "function") res.flushHeaders();
   }
-  const chatKeepalive = body.stream ? setInterval(() => { try { res.write(": keepalive\n\n"); } catch {} }, 15000) : null;
+  const chatKeepalive = body.stream
+    ? setInterval(() => { try { res.write(": keepalive\n\n"); } catch {} }, 15000)
+    : null;
   if (chatKeepalive) res.on("close", () => clearInterval(chatKeepalive));
 
+  let activeRoute = routes[0];
+  if (activeRoute.visionFallback) {
+    log.info(
+      "image fallback applied: provider=" + activeRoute.provider.id +
+      " model=" + activeRoute.upstreamModel +
+      " client_model=" + body.model,
+    );
+  }
+  let response: Response | undefined;
+  for (let attemptIndex = 0; attemptIndex < routes.length; attemptIndex++) {
+    activeRoute = routes[attemptIndex];
+    try {
+      const resolvedModel = activeRoute.provider.resolveModel(activeRoute.upstreamModel);
+      const ctx: PreprocessCtx = {
+        upstreamModel: activeRoute.upstreamModel,
+        dataDir: cfg.dataDir,
+        disableThinking: cfg.disableThinking,
+        forceHighEffort: false,
+        webSearchEnabled: cfg.webSearch,
+        supportsImages: resolvedModel?.supportsImages ?? false,
+      };
+      const chatBody = activeRoute.provider.preprocessChat(body, ctx);
+      chatBody.model = activeRoute.upstreamModel;
+      const chatAutoCompact = resolveAutoCompact(cfg, resolvedModel?.contextWindow);
+      if (chatAutoCompact.enabled && chatAutoCompact.atTokens != null && (chatBody as any).messages) {
+        const callChatSummary = async (summaryReq: any) => {
+          const summaryResponse = await callOpenAICompat(
+            { baseUrl: activeRoute.baseUrl, apiKey: activeRoute.apiKey },
+            { ...summaryReq, model: activeRoute.upstreamModel },
+            new AbortController().signal,
+          );
+          const summaryJson = await summaryResponse.json() as any;
+          return summaryJson.choices?.[0]?.message?.content ?? "";
+        };
+        await maybeCompactChat(chatBody as any, { atTokens: chatAutoCompact.atTokens, callChat: callChatSummary });
+      }
+      response = await callOpenAICompat(
+        { baseUrl: activeRoute.baseUrl, apiKey: activeRoute.apiKey },
+        chatBody as any,
+        ac.signal,
+      );
+      break;
+    } catch (err) {
+      const pending = attemptIndex < routes.length - 1 && shouldFallback(err, ac.signal.aborted);
+      logAttemptFailure(activeRoute, body, "/v1/chat/completions", startTime, !!body.stream, err, pending);
+      if (pending) {
+        log.warn("fallback: " + activeRoute.provider.id + " failed, trying " + routes[attemptIndex + 1].provider.id + ":" + routes[attemptIndex + 1].upstreamModel);
+        continue;
+      }
+      break;
+    }
+  }
+
+  if (!response) {
+    if (chatKeepalive) clearInterval(chatKeepalive);
+    if (!res.headersSent) {
+      sendJson(res, 502, errorEnvelope(502, "upstream_unreachable", "All provider attempts failed"));
+    } else {
+      try { res.end(); } catch {}
+    }
+    return;
+  }
+
   try {
-    const response = await callOpenAICompat({ baseUrl: route.baseUrl, apiKey: route.apiKey }, chatBody as any, ac.signal);
     const contentType = response.headers.get("content-type") || "";
     if (contentType.includes("text/event-stream") && body.stream) {
       if (response.body && typeof response.body.getReader === "function") {
@@ -479,6 +756,7 @@ async function handleChatPassthrough(cfg: AppConfig, req: IncomingMessage, res: 
         const bodyTimeoutAc = new AbortController();
         const bodyTimeoutId = setTimeout(() => bodyTimeoutAc.abort(), 120_000);
         const mergedSignal = AbortSignal.any([ac.signal, bodyTimeoutAc.signal]);
+        let streamError: unknown = null;
         mergedSignal.addEventListener("abort", () => {
           clearTimeout(bodyTimeoutId);
           try { response.body?.cancel(); } catch {}
@@ -491,6 +769,7 @@ async function handleChatPassthrough(cfg: AppConfig, req: IncomingMessage, res: 
             try { res.write(value); } catch {}
           }
         } catch (err) {
+          streamError = err;
           try { log.error("chat passthrough stream error: " + (err as Error).message); } catch {}
         } finally {
           clearTimeout(bodyTimeoutId);
@@ -498,32 +777,72 @@ async function handleChatPassthrough(cfg: AppConfig, req: IncomingMessage, res: 
           try { reader.cancel(); } catch {}
           try { res.end(); } catch {}
         }
+        insertLog({
+          ts: startTime,
+          provider_id: activeRoute.provider.id,
+          client_model: body.model,
+          upstream_model: activeRoute.upstreamModel,
+          endpoint: "/v1/chat/completions",
+          status_code: streamError ? 500 : 200,
+          duration_ms: Date.now() - startTime,
+          stream: 1,
+          error_code: streamError ? "stream_error" : undefined,
+          error_snippet: streamError ? (streamError as Error).message?.substring(0, 2000) : undefined,
+          request_body: JSON.stringify(body).substring(0, 2000000),
+          ...extractThreadInfo(body),
+        });
       } else {
         if (chatKeepalive) clearInterval(chatKeepalive);
         res.end();
+        insertLog({
+          ts: startTime,
+          provider_id: activeRoute.provider.id,
+          client_model: body.model,
+          upstream_model: activeRoute.upstreamModel,
+          endpoint: "/v1/chat/completions",
+          status_code: 200,
+          duration_ms: Date.now() - startTime,
+          stream: 1,
+          request_body: JSON.stringify(body).substring(0, 2000000),
+          ...extractThreadInfo(body),
+        });
       }
     } else {
       const json = await response.json();
+      if (chatKeepalive) clearInterval(chatKeepalive);
       sendJson(res, 200, json);
+      insertLog({
+        ts: startTime,
+        provider_id: activeRoute.provider.id,
+        client_model: body.model,
+        upstream_model: activeRoute.upstreamModel,
+        endpoint: "/v1/chat/completions",
+        status_code: 200,
+        duration_ms: Date.now() - startTime,
+        stream: 0,
+        request_body: JSON.stringify(body).substring(0, 2000000),
+        response_body: JSON.stringify(json).substring(0, 2000000),
+        ...extractThreadInfo(body),
+      });
     }
-    insertLog({
-      ts: startTime, provider_id: route.provider.id, client_model: body.model,
-      upstream_model: route.upstreamModel, endpoint: "/v1/chat/completions",
-      status_code: 200, duration_ms: Date.now() - startTime, stream: body.stream ? 1 : 0,
-...extractThreadInfo(body),
-});
   } catch (err) {
-    if (ac.signal.aborted) return; // client disconnected, no point logging error
+    if (chatKeepalive) clearInterval(chatKeepalive);
+    if (ac.signal.aborted) return;
     const status = err instanceof UpstreamError ? err.status : 500;
     insertLog({
-      ts: startTime, provider_id: route.provider.id, client_model: body.model,
-      upstream_model: route.upstreamModel, endpoint: "/v1/chat/completions",
-      status_code: status, duration_ms: Date.now() - startTime, stream: body.stream ? 1 : 0,
+      ts: startTime,
+      provider_id: activeRoute.provider.id,
+      client_model: body.model,
+      upstream_model: activeRoute.upstreamModel,
+      endpoint: "/v1/chat/completions",
+      status_code: status,
+      duration_ms: Date.now() - startTime,
+      stream: body.stream ? 1 : 0,
       error_code: err instanceof UpstreamError ? err.code : "internal_error",
       error_snippet: (err as Error).message?.substring(0, 2000),
       request_body: JSON.stringify(body).substring(0, 2000000),
-...extractThreadInfo(body),
-});
+      ...extractThreadInfo(body),
+    });
     if (!res.headersSent) {
       if (err instanceof UpstreamError) {
         sendJson(res, err.status, errorEnvelope(err.status, err.code, err.message));
@@ -597,11 +916,15 @@ export function createServer_(cfg: AppConfig) {
       })();
       return;
     }
-    if (handleWebRequest(req, res, cfg.dataDir)) return;
+    if (handleWebRequest(req, res, cfg.dataDir, cfg)) return;
     sendJson(res, 404, errorEnvelope(404, "not_found", "no route for " + method + " " + path));
   });
   server.listen(cfg.port, cfg.host);
   log.info("anyway2codex listening on http://" + cfg.host + ":" + cfg.port);
+  const startupFallback = resolveFallbackSettings({ enabled: cfg.fallbackEnabled, providerId: cfg.fallbackProviderId, model: cfg.fallbackModel });
+  if (startupFallback.enabled) {
+    log.info("fallback enabled: " + startupFallback.providerId + ":" + startupFallback.model);
+  }
   return server;
 }
 

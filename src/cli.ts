@@ -24,6 +24,17 @@ Options:
   --host <host>         Host (default: 127.0.0.1)
   --data-dir <dir>      Data directory (default: ~/.anyway2codex)
   --provider <id>       Default provider (default: mimo)
+  --fallback-provider   Fallback provider (default: qwen)
+  --fallback-model      Fallback model (default: qwen3.8-flash)
+  --no-fallback         Disable automatic provider fallback
+  --vision-fallback     Temporarily route image requests to a vision model
+  --no-vision-fallback  Disable image fallback
+  --vision-fallback-provider  Vision fallback provider (default: mimo)
+  --vision-fallback-model      Vision fallback model (default: mimo-v2.6-flash)
+  --proxy-controls-model  Let the proxy choose the primary model
+  --no-proxy-controls-model  Route by the model sent by Codex
+  --primary-provider    Proxy primary provider
+  --primary-model       Proxy primary model
   --verbose, -v         Verbose logging
   --help, -h            Show help
   --version, -V         Show version

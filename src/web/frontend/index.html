@@ -313,6 +313,10 @@
         </div>
         <div class="mode-actions">
           <div>
+            <label style="display:flex;align-items:center;gap:6px;color:#bbb;font-size:13px;margin-bottom:8px;">
+              <input type="checkbox" id="proxy-controls-model"> 由代理控制模型
+            </label>
+            <br>
             <select id="domestic-provider" style="margin-bottom:8px;">
               <option value="mimo">MiMo</option>
               <option value="deepseek">DeepSeek</option>
@@ -333,10 +337,45 @@
               <option value="gpt-5.5">GPT-5.5</option>
             </select>
             <br>
-            <input type="password" id="openai-key" placeholder="OpenAI API Key (sk-...)" style="width:280px;margin-bottom:8px;">
+            <div id="oauth-status" style="width:280px;margin-bottom:8px;color:#888;font-size:12px;">检查登录状态...</div>
             <br>
             <button class="btn btn-success" onclick="switchToOpenAI()">切换到 OpenAI 直连</button>
           </div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px;">
+        <div class="card-header">
+          <h3>自动 Fallback</h3>
+          <span id="fallback-summary" style="color:#90caf9;font-size:13px;">读取中...</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label style="display:flex;align-items:center;gap:6px;color:#bbb;font-size:13px;">
+            <input type="checkbox" id="fallback-enabled" checked> 启用自动切换
+          </label>
+          <select id="fallback-provider" style="min-width:180px;"></select>
+          <select id="fallback-model" style="min-width:220px;"></select>
+          <button class="btn btn-primary" onclick="saveFallback()">保存 Fallback</button>
+          <button class="btn btn-primary" onclick="saveRouting()">保存代理路由</button>
+        </div>
+        <div style="margin-top:10px;color:#777;font-size:12px;">
+          主模型由上方“切换到国产模型”控制；只有主模型和备用模型不同时，故障切换才会生效。
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px;">
+        <div class="card-header">
+          <h3>图片回退（多模态）</h3>
+          <span id="vision-fallback-summary" style="color:#90caf9;font-size:13px;">读取中...</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label style="display:flex;align-items:center;gap:6px;color:#bbb;font-size:13px;">
+            <input type="checkbox" id="vision-fallback-enabled" checked> 请求含图片时临时切换
+          </label>
+          <select id="vision-fallback-provider" style="min-width:180px;"></select>
+          <select id="vision-fallback-model" style="min-width:220px;"></select>
+          <button class="btn btn-primary" onclick="saveVisionFallback()">保存图片回退</button>
+        </div>
+        <div style="margin-top:10px;color:#777;font-size:12px;">
+          只改写当前含图片的请求；下一条纯文本请求自动恢复原主模型，不丢弃图片数据。
         </div>
       </div>
     </div>
@@ -417,6 +456,9 @@
     const API = '/admin/api';
     let providers = [];
     let currentMode = null;
+    let fallbackSettings = null;
+    let visionFallbackSettings = null;
+    let visionFallbackProviders = [];
 
     // Navigation
     document.querySelectorAll('.sidebar nav a').forEach(a => {
@@ -483,6 +525,127 @@
 
     document.getElementById('domestic-provider').addEventListener('change', renderDomesticModels);
 
+    // Fallback
+    function renderFallbackModels(selectedModel) {
+      const providerId = document.getElementById("fallback-provider").value;
+      const modelSelect = document.getElementById("fallback-model");
+      const provider = providers.find(x => x.id === providerId);
+      modelSelect.innerHTML = provider ? provider.models.map(m =>
+        `<option value="${m.id}">${m.displayName || m.id}${m.supportsImages ? " 📷" : ""}</option>`
+      ).join("") : "";
+      if (selectedModel && Array.from(modelSelect.options).some(o => o.value === selectedModel)) {
+        modelSelect.value = selectedModel;
+      }
+    }
+
+    function updateFallbackSummary() {
+      const el = document.getElementById("fallback-summary");
+      if (!el) return;
+      const primary = currentMode?.primary
+        ? ((currentMode.primary.providerId || "?") + " / " + (currentMode.primary.model || "?"))
+        : (currentMode ? ((currentMode.provider || "?") + " / " + (currentMode.model || "?")) : "读取中");
+      const fallback = currentMode?.fallback || fallbackSettings;
+      const backup = fallback
+        ? (fallback.enabled
+            ? ((fallback.providerId || "?") + " / " + (fallback.model || "?"))
+            : "已关闭")
+        : "读取中";
+      el.textContent = "主：" + primary + "  →  备用：" + backup;
+    }
+
+    async function loadFallback() {
+      const data = await api("/fallback");
+      if (!data.settings) return;
+      fallbackSettings = data.settings;
+      providers = data.providers || providers;
+      const providerSelect = document.getElementById("fallback-provider");
+      providerSelect.innerHTML = providers.map(p =>
+        `<option value="${p.id}">${p.displayName || p.id}</option>`
+      ).join("");
+      providerSelect.value = fallbackSettings.providerId;
+      renderFallbackModels(fallbackSettings.model);
+      document.getElementById("fallback-enabled").checked = !!fallbackSettings.enabled;
+      updateFallbackSummary();
+    }
+
+    async function saveFallback() {
+      const body = {
+        enabled: document.getElementById("fallback-enabled").checked,
+        providerId: document.getElementById("fallback-provider").value,
+        modelId: document.getElementById("fallback-model").value,
+      };
+      const r = await api("/fallback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.success) {
+        toast(r.message || "Fallback 保存失败");
+        return;
+      }
+      fallbackSettings = r.settings;
+      updateFallbackSummary();
+      toast("Fallback 已保存，立即生效");
+    }
+
+    document.getElementById("fallback-provider").addEventListener("change", () => renderFallbackModels());
+
+    function renderVisionFallbackModels(selectedModel) {
+      const providerId = document.getElementById("vision-fallback-provider").value;
+      const modelSelect = document.getElementById("vision-fallback-model");
+      const provider = visionFallbackProviders.find(x => x.id === providerId);
+      modelSelect.innerHTML = provider ? provider.models.map(m =>
+        `<option value="${m.id}">${m.displayName || m.id} 📷</option>`
+      ).join("") : "";
+      if (selectedModel && Array.from(modelSelect.options).some(o => o.value === selectedModel)) {
+        modelSelect.value = selectedModel;
+      }
+    }
+
+    function updateVisionFallbackSummary() {
+      const el = document.getElementById("vision-fallback-summary");
+      if (!el || !visionFallbackSettings) return;
+      el.textContent = visionFallbackSettings.enabled
+        ? ("图片请求 → " + visionFallbackSettings.providerId + " / " + visionFallbackSettings.model)
+        : "已关闭";
+    }
+
+    async function loadVisionFallback() {
+      const data = await api("/vision-fallback");
+      if (!data.settings) return;
+      visionFallbackSettings = data.settings;
+      visionFallbackProviders = data.providers || [];
+      const providerSelect = document.getElementById("vision-fallback-provider");
+      providerSelect.innerHTML = visionFallbackProviders.map(p =>
+        `<option value="${p.id}">${p.displayName || p.id}</option>`
+      ).join("");
+      providerSelect.value = visionFallbackSettings.providerId;
+      renderVisionFallbackModels(visionFallbackSettings.model);
+      document.getElementById("vision-fallback-enabled").checked = !!visionFallbackSettings.enabled;
+      updateVisionFallbackSummary();
+    }
+
+    async function saveVisionFallback() {
+      const r = await api("/vision-fallback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled: document.getElementById("vision-fallback-enabled").checked,
+          providerId: document.getElementById("vision-fallback-provider").value,
+          modelId: document.getElementById("vision-fallback-model").value,
+        }),
+      });
+      if (!r.success) {
+        toast(r.message || "图片回退保存失败");
+        return;
+      }
+      visionFallbackSettings = r.settings;
+      updateVisionFallbackSummary();
+      toast("图片回退已保存，立即生效");
+    }
+
+    document.getElementById("vision-fallback-provider").addEventListener("change", () => renderVisionFallbackModels());
+
     // Keys
     async function renderKeys() {
       const keys = await api('/keys');
@@ -527,8 +690,15 @@
       } else {
         badge.className = 'mode-badge domestic';
         badge.textContent = '国产模型';
-        model.textContent = (currentMode.provider || '') + ' / ' + (currentMode.model || '');
+        model.textContent = currentMode.proxyControlsModel
+          ? ((currentMode.primary?.providerId || '') + ' / ' + (currentMode.primary?.model || '') + '（代理控制）')
+          : ((currentMode.provider || '') + ' / ' + (currentMode.model || ''));
       }
+      document.getElementById('proxy-controls-model').checked = !!currentMode.proxyControlsModel;
+      document.getElementById('oauth-status').textContent = currentMode.oauthReady
+        ? '已使用现有 ChatGPT 登录'
+        : '未检测到完整 ChatGPT 登录';
+      updateFallbackSummary();
     }
 
     async function switchToDomestic() {
@@ -536,7 +706,12 @@
       const model = document.getElementById('domestic-model').value;
       const r = await api('/mode/switch', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'domestic', providerId: provider, modelId: model })
+        body: JSON.stringify({
+          action: 'domestic',
+          providerId: provider,
+          modelId: model,
+          proxyControlsModel: document.getElementById('proxy-controls-model').checked
+        })
       });
       toast(r.message || '已切换');
       loadMode();
@@ -544,14 +719,26 @@
 
     async function switchToOpenAI() {
       const model = document.getElementById('openai-model').value;
-      const key = document.getElementById('openai-key').value;
-      if (!key) { toast('请输入 OpenAI API Key'); return; }
       const r = await api('/mode/switch', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'openai', openaiKey: key, modelId: model })
+        body: JSON.stringify({ action: 'openai', modelId: model })
       });
       toast(r.message || '已切换');
       loadMode();
+    }
+
+    async function saveRouting() {
+      const r = await api('/routing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          proxyControlsModel: document.getElementById('proxy-controls-model').checked,
+          primaryProviderId: document.getElementById('domestic-provider').value,
+          primaryModel: document.getElementById('domestic-model').value
+        })
+      });
+      toast(r.message || (r.success ? '代理路由已保存' : '代理路由保存失败'));
+      if (r.success) loadMode();
     }
 
         // Flat log view
@@ -878,7 +1065,7 @@
 
     // Page loader
     function loadPage(page) {
-      if (page === 'mode') loadMode();
+      if (page === 'mode') { loadMode(); loadFallback(); loadVisionFallback(); }
       if (page === 'logs') { loadConversations(); loadLogs(); }
     if (page === 'conversations') { loadConversations2(); }
       if (page === 'backups') loadBackups();
@@ -980,6 +1167,8 @@ function escHtml(s) {
         // Init
     loadProviders();
     loadMode();
+    loadFallback();
+    loadVisionFallback();
     loadLogs(false);
   </script>
 </body>

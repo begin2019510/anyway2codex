@@ -17,6 +17,7 @@ crash.log
 !src/web/frontend/index.html
 *.ts
 !src/**/*.ts
+!tests/**/*.ts
 *.js
 !postbuild.cjs
 *.json.tmp

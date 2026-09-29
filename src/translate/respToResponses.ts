@@ -35,6 +35,7 @@ function mapUsage(u: ChatCompletionResponse["usage"]): Record<string, unknown> |
 export function respToResponses(chat: ChatCompletionResponse, req: ResponsesRequest, opts: {
   exposeReasoning?: boolean;
   namespaceMap?: Map<string, string>;
+  model?: string;
 } = {}): Record<string, unknown> {
   const choice = chat.choices[0];
   const message = choice?.message;
@@ -92,7 +93,7 @@ export function respToResponses(chat: ChatCompletionResponse, req: ResponsesRequ
     object: "response",
     created_at: chat.created,
     status: incomplete ? "incomplete" : "completed",
-    model: chat.model,
+    model: opts.model || chat.model,
     output,
     usage: mapUsage(chat.usage),
     parallel_tool_calls: req.parallel_tool_calls ?? true,

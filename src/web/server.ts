@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { registerAdminRoutes } from "./api/index.js";
+import type { AppConfig } from "../config.js";
 
 function sendJson(res: ServerResponse, status: number, data: unknown) {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -19,10 +20,10 @@ function serveStatic(res: ServerResponse, filePath: string) {
   res.end(readFileSync(filePath, "utf-8"));
 }
 
-export function handleWebRequest(req: IncomingMessage, res: ServerResponse, dataDir: string): boolean {
+export function handleWebRequest(req: IncomingMessage, res: ServerResponse, dataDir: string, cfg: AppConfig): boolean {
   const url = req.url || "/";
   const path = url.split("?")[0];
-  if (path.startsWith("/admin/api/")) return registerAdminRoutes(req, res, dataDir);
+  if (path.startsWith("/admin/api/")) return registerAdminRoutes(req, res, dataDir, cfg);
   const frontendDir = join(import.meta.dirname || __dirname, "frontend");
   if (path === "/" || path === "/admin") { serveStatic(res, join(frontendDir, "index.html")); return true; }
   if (path.startsWith("/admin/")) {
