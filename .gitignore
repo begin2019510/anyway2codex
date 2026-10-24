@@ -39,4 +39,8 @@ current.html
 task.xml
 write-frontend.py
 patch_server.js
-postbuild.cjs
+
+# local scratch / editor backups
+.tmp/
+*.bak
+*.bak-*

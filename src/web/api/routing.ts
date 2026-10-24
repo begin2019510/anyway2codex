@@ -1,4 +1,5 @@
 import { PROVIDERS } from "../../providers/registry.js";
+import { listProviderChoices } from "./providers.js";
 import { resolveRoutingSettings, saveRoutingSettings } from "../../routingSettings.js";
 import { resolveFallbackSettings } from "../../fallbackSettings.js";
 import { getOAuthStatus } from "../../codex/modeSwitch.js";
@@ -19,18 +20,7 @@ export function getRoutingSettings(cfg: AppConfig) {
     settings,
     fallback,
     oauth: getOAuthStatus(),
-    providers: Object.values(PROVIDERS).map((provider) => ({
-      id: provider.id,
-      displayName: provider.displayName,
-      defaultModel: provider.defaultModel,
-      models: provider.builtinModels
-        .filter((model) => !model.deprecatedAfter)
-        .map((model) => ({
-          id: model.id,
-          displayName: model.displayName || model.id,
-          supportsImages: model.supportsImages,
-        })),
-    })),
+    providers: listProviderChoices(cfg),
   };
 }
 

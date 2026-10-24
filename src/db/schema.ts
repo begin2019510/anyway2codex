@@ -48,6 +48,23 @@ CREATE TABLE IF NOT EXISTS mode_history (
 );
 `,
   },
+  {
+    version: 4,
+    sql: `
+CREATE TABLE IF NOT EXISTS provider_credentials (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  provider_id TEXT NOT NULL,
+  base_url TEXT NOT NULL,
+  api_key_encrypted TEXT,
+  api_key_hint TEXT,
+  source TEXT NOT NULL,
+  changed_at INTEGER NOT NULL,
+  is_active INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_provider_credentials_provider
+  ON provider_credentials(provider_id, changed_at DESC);
+`,
+  },
   // v4: thread_id and turn_id already added manually
 
 ];

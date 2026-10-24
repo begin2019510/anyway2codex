@@ -1,4 +1,5 @@
 import { PROVIDERS } from "../../providers/registry.js";
+import { listProviderChoices } from "./providers.js";
 import {
   resolveVisionFallbackSettings,
   saveVisionFallbackSettings,
@@ -13,16 +14,10 @@ export function getVisionFallbackSettings(cfg: AppConfig) {
   });
   return {
     settings,
-    providers: Object.values(PROVIDERS)
+    providers: listProviderChoices(cfg)
       .map((provider) => ({
-        id: provider.id,
-        displayName: provider.displayName,
-        models: provider.builtinModels
-          .filter((model) => !model.deprecatedAfter && model.supportsImages === true)
-          .map((model) => ({
-            id: model.id,
-            displayName: model.displayName || model.id,
-          })),
+        ...provider,
+        models: provider.models.filter((model) => model.supportsImages === true),
       }))
       .filter((provider) => provider.models.length > 0),
   };

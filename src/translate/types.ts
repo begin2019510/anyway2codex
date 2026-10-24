@@ -1,3 +1,33 @@
+// Anthropic Messages API types (Claude Code client side).
+// Deliberately loose: the proxy forwards this body verbatim, so it only needs
+// enough typing to reach `model` and `messages`. Block shapes the upstream does
+// not implement are dropped by anthropicSanitize.ts instead of being re-modelled.
+export interface AnthropicMessagesRequest {
+  model: string;
+  messages: AnthropicMessage[];
+  system?: string | AnthropicContentBlock[];
+  max_tokens?: number;
+  temperature?: number;
+  top_p?: number;
+  stop_sequences?: string[];
+  stream?: boolean;
+  tools?: unknown[];
+  tool_choice?: unknown;
+  metadata?: unknown;
+  [key: string]: unknown;
+}
+
+export interface AnthropicMessage {
+  role: string;
+  content: string | AnthropicContentBlock[];
+  [key: string]: unknown;
+}
+
+export interface AnthropicContentBlock {
+  type: string;
+  [key: string]: unknown;
+}
+
 // Responses API types (Codex client side)
 export interface ResponsesRequest {
   model: string;
@@ -76,6 +106,10 @@ export interface ChatRequest {
   stream_options?: { include_usage: boolean };
   reasoning_effort?: string;
   thinking?: { type: string };
+  /** Qwen/DashScope gateway switch, not a standard OpenAI field. */
+  enable_thinking?: boolean;
+  /** Qwen/GLM/Kimi thinking token budget, not a standard OpenAI field. */
+  thinking_budget?: number;
 }
 
 export interface ChatMessage {

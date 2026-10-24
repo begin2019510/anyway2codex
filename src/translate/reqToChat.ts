@@ -229,7 +229,9 @@ export interface ReqToChatOpts {
 }
 
 // Placeholder for historical assistant messages that lack reasoning_content
-const MIXED_MODE_PLACEHOLDER = "(this turn ran without thinking mode)";
+// The name matches the mimo2codex sidecar export because postbuild swaps
+// this module for the sidecar's compiled translator at build time.
+export const MIXED_MODE_REASONING_PLACEHOLDER = "(this turn ran without thinking mode)";
 
 // Main translation: Responses API request -> Chat Completions request
 export function reqToChat(req: ResponsesRequest, opts: ReqToChatOpts = {}): ChatRequest {
@@ -293,7 +295,7 @@ export function reqToChat(req: ResponsesRequest, opts: ReqToChatOpts = {}): Chat
     let injected = 0;
     for (const m of chat.messages) {
       if (m.role === "assistant" && !m.reasoning_content) {
-        m.reasoning_content = MIXED_MODE_PLACEHOLDER;
+        m.reasoning_content = MIXED_MODE_REASONING_PLACEHOLDER;
         injected++;
       }
     }

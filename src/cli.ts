@@ -48,6 +48,7 @@ if (args.includes("--version") || args.includes("-V")) {
 
 const cfg = buildConfig(args);
 process.env.ANYWAY_PORT = String(cfg.port);
+process.env.ANYWAY_DATA_DIR = cfg.dataDir;
 mkdirSync(cfg.dataDir, { recursive: true });
 
 // Initialize database

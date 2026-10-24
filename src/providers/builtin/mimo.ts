@@ -60,6 +60,12 @@ const BUILTIN_MODELS: ModelInfo[] = [
 
 const PAYG_BASE_URL = "https://api.xiaomimimo.com/v1";
 const TOKEN_PLAN_BASE_URL = "https://token-plan-cn.xiaomimimo.com/v1";
+// Same two deployments, Anthropic Messages surface. Both are verified reachable; the
+// token-plan one is what a "tp-" key is entitled to.
+const PAYG_ANTHROPIC_BASE_URL = "https://api.xiaomimimo.com/anthropic";
+const TOKEN_PLAN_ANTHROPIC_BASE_URL = "https://token-plan-cn.xiaomimimo.com/anthropic";
+const QUOTA_EXHAUSTED = /quota\s*exhausted/i;
+const UNSUPPORTED_MODEL = /unsupported model/i;
 const WEB_SEARCH_DISABLED_MARKER = "webSearchEnabled is false";
 
 function isTokenPlan(apiKey: string, baseUrl: string): boolean {
@@ -142,7 +148,35 @@ export const mimo: Provider = {
     }
     return normalizeMimoBody(out, ctx.upstreamModel ?? out.model);
   },
+  supportsAnthropic: true,
+  anthropicModelPrefixes: ["mimo"],
+  resolveAnthropicBaseUrl(apiKey, baseUrl) {
+    return isTokenPlan(apiKey, baseUrl) ? TOKEN_PLAN_ANTHROPIC_BASE_URL : PAYG_ANTHROPIC_BASE_URL;
+  },
+  preprocessMessages(req) {
+    // MiMo implements the Anthropic Messages protocol, so the request is forwarded as
+    // the client wrote it - model name included. No alias rewriting on this path.
+    return { body: { ...req }, removed: [] };
+  },
+  isTerminalError({ status, snippet }) {
+    if (status === 429 && QUOTA_EXHAUSTED.test(snippet ?? "")) return true;
+    if (status === 400 && UNSUPPORTED_MODEL.test(snippet ?? "")) return true;
+    return false;
+  },
   enhanceError({ status, snippet }) {
+    if (status === 429 && QUOTA_EXHAUSTED.test(snippet ?? "")) {
+      return {
+        code: "quota_exhausted",
+        message: "MiMo token-plan quota is exhausted: " + (snippet ?? "").trim().slice(0, 300) +
+          ". Top up the plan or pick another model. This is the real upstream error, not a fallback.",
+      };
+    }
+    if (status === 400 && UNSUPPORTED_MODEL.test(snippet ?? "")) {
+      return {
+        code: "unsupported_model",
+        message: "MiMo does not serve this model: " + (snippet ?? "").trim().slice(0, 300) + ".",
+      };
+    }
     if (status === 400 && snippet?.includes(WEB_SEARCH_DISABLED_MARKER)) {
       return {
         code: "web_search_plugin_not_activated",

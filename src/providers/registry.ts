@@ -1,4 +1,4 @@
-import type { Provider } from "./types.js";
+import type { ModelInfo, Provider } from "./types.js";
 import { mimo } from "./builtin/mimo.js";
 import { deepseek } from "./builtin/deepseek.js";
 import { qwen } from "./builtin/qwen.js";
@@ -29,10 +29,31 @@ export function byShortcut(s: string): Provider | undefined {
 }
 
 export function byClientModel(model: string): Provider | undefined {
+  // Two passes: a provider that natively owns the model id always wins over a
+  // gateway that merely hosts a copy of it (claim: false). This keeps
+  // glm-5.3 -> Zhipu and deepseek-v4-pro -> DeepSeek even when the Qwen
+  // gateway can serve the same id; use the qwen/<id> alias to force Qwen.
+  let hosted: Provider | undefined;
   for (const p of providerListMutable) {
-    if (p.resolveModel(model)) return p;
+    const info = p.resolveModel(model);
+    if (!info) continue;
+    if (info.claim === false) {
+      hosted ??= p;
+      continue;
+    }
+    return p;
   }
-  return undefined;
+  return hosted;
+}
+
+export function listProviderModels(
+  provider: Provider,
+  runtime?: { baseUrl: string; apiKey: string },
+): ModelInfo[] {
+  const models = provider.listModels && runtime
+    ? provider.listModels(runtime)
+    : provider.builtinModels;
+  return models.filter((model) => !model.deprecatedAfter && model.hidden !== true);
 }
 
 export function isProviderId(s: string): boolean {

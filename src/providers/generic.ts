@@ -42,6 +42,7 @@ export function createGenericProvider(spec: GenericProviderSpec): Provider {
         forceParallelToolCalls: false,
         enableWebSearch: false,
         imageDropDir: ctx.dataDir,
+        supportsImages: ctx.supportsImages,
         disableThinking: ctx.disableThinking,
         forceHighEffort: ctx.forceHighEffort,
         upstreamModel: ctx.upstreamModel,

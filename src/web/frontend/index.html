@@ -44,6 +44,32 @@
     .stat-card.green .value { color: #4caf50; }
     .stat-card.orange .value { color: #ff9800; }
     .stat-card.red .value { color: #f44336; }
+    .token-panel-grid { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(280px, 1fr); gap: 20px; }
+    .token-canvas-wrap { min-height: 280px; }
+    #token-chart { width: 100%; height: 280px; display: block; }
+    .token-legend { display: flex; gap: 18px; font-size: 12px; color: #888; margin-top: 8px; }
+    .token-legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; background: var(--legend-color); }
+    .token-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .token-summary-item { background: #0e0e17; border: 1px solid #1a1a2e; border-radius: 8px; padding: 12px; }
+    .token-summary-item .label { color: #666; font-size: 11px; }
+    .token-summary-item .value { color: #e0e0e0; font-size: 17px; font-weight: 650; margin-top: 4px; }
+    .token-summary-item .value.actual { color: #4fc3f7; }
+    .token-summary-item .value.estimated { color: #ffb74d; }
+    .token-summary-item .value.positive { color: #4caf50; }
+    .token-summary-item .value.negative { color: #f44336; }
+    .token-table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: 12px; }
+    .token-table th, .token-table td { padding: 9px 10px; border-bottom: 1px solid #1a1a2e; text-align: right; white-space: nowrap; }
+    .token-table th:first-child, .token-table td:first-child { text-align: left; }
+    .token-table th { color: #666; font-weight: 600; background: #0e0e17; }
+    .token-table td { color: #bbb; font-variant-numeric: tabular-nums; }
+    .token-table .actual { color: #4fc3f7; }
+    .token-table .estimated { color: #ffb74d; }
+    .token-table .positive { color: #4caf50; }
+    .token-table .negative { color: #f44336; }
+    .token-table-wrap { width: 100%; max-width: 100%; overflow-x: auto; margin-top: 16px; -webkit-overflow-scrolling: touch; }
+    @media (max-width: 1050px) {
+      .token-panel-grid { grid-template-columns: 1fr; }
+    }
     
     /* Mode switcher */
     .mode-card { background: linear-gradient(135deg, #12121c 0%, #1a1a2e 100%); border: 1px solid #2a2a4a; border-radius: 16px; padding: 32px; margin-bottom: 24px; }
@@ -79,6 +105,16 @@
     .model-tag.vision { background: rgba(76,175,80,0.1); color: #4caf50; border-color: rgba(76,175,80,0.2); }
     .model-tag.deprecated { opacity: 0.4; text-decoration: line-through; }
     .model-tag .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .model-tag.hosted { background: rgba(255,193,7,0.1); color: #ffc107; border-color: rgba(255,193,7,0.2); }
+    .model-tag .cap { opacity: 0.85; }
+    .model-tag .scope { font-size: 10px; opacity: 0.7; }
+    .provider-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+    .mode-badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid #2a2a3e; color: #9aa4b2; background: #161624; }
+    .mode-badge.plan { color: #4fc3f7; border-color: rgba(79,195,247,0.3); }
+    .mode-badge.payg { color: #b39ddb; border-color: rgba(179,157,219,0.3); }
+    .mode-badge.ok { color: #4caf50; border-color: rgba(76,175,80,0.3); }
+    .mode-badge.warn { color: #ff9800; border-color: rgba(255,152,0,0.3); }
+    .provider-endpoint { font-size: 11px; color: #5f6b7a; margin-bottom: 12px; word-break: break-all; }
     
     /* Table */
     .table-wrap { overflow-x: auto; }
@@ -99,6 +135,25 @@
     .key-row input:focus { outline: none; border-color: #4fc3f7; }
     .key-row .saved { font-size: 11px; color: #4caf50; opacity: 0; transition: opacity 0.3s; }
     .key-row .saved.show { opacity: 1; }
+
+    .credential-grid { display: grid; gap: 16px; }
+    .credential-card { padding: 16px; background: #101016; border: 1px solid #252530; border-radius: 12px; }
+    .credential-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .credential-head .provider-name { font-weight: 600; color: #f0f0f5; }
+    .credential-sources { display: flex; flex-wrap: wrap; gap: 6px; }
+    .source-badge { padding: 3px 8px; border-radius: 999px; background: #1a1a24; color: #9aa0b5; font-size: 11px; }
+    .credential-fields { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(240px, 1fr); gap: 12px; }
+    .credential-field { min-width: 0; }
+    .credential-field label { display: block; margin-bottom: 6px; color: #8f95a8; font-size: 12px; }
+    .credential-field input { width: 100%; padding: 10px 12px; background: #09090e; border: 1px solid #2a2a36; border-radius: 8px; color: #e6e8f0; font: 12px/1.4 monospace; }
+    .credential-field input:focus { outline: none; border-color: #4fc3f7; }
+    .credential-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .history-panel { display: none; margin-top: 14px; padding-top: 14px; border-top: 1px solid #252530; overflow-x: auto; }
+    .history-panel.open { display: block; }
+    .history-table { width: 100%; min-width: 760px; border-collapse: collapse; }
+    .history-table th, .history-table td { padding: 9px 10px; border-bottom: 1px solid #252530; text-align: left; font-size: 12px; }
+    .history-table th { color: #7f869b; font-weight: 500; }
+    .active-history { color: #4caf50; }
     
     /* Toast */
     .toast { position: fixed; bottom: 24px; right: 24px; background: #1a1a2e; color: #4caf50; padding: 12px 20px; border-radius: 10px; font-size: 13px; border: 1px solid rgba(76,175,80,0.3); z-index: 1000; animation: slideIn 0.3s ease; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
@@ -230,11 +285,16 @@
 .conv-item .conv-meta span { margin-right: 12px; }
 .conv-item .conv-meta .conv-count { color: #4fc3f7; }
 .conv-item .conv-meta .conv-tokens { color: #81c784; }
+    .conv-item .conv-meta .conv-estimate { color: #ffb74d; }
 .conv-item .conv-meta .conv-errors { color: #f44336; }
 .conv-detail { display: flex; flex-direction: column; height: calc(100vh - 180px); }
 .conv-detail-header { padding: 16px 20px; border-bottom: 1px solid #1a1a2e; }
 .conv-detail-header h3 { font-size: 16px; color: #e0e0e0; margin: 0 0 8px 0; }
 .conv-detail-header .conv-detail-meta { font-size: 12px; color: #666; }
+    .token-rollup { display: grid; grid-template-columns: repeat(6, minmax(110px, 1fr)); gap: 8px; padding: 14px 20px; border-bottom: 1px solid #1a1a2e; overflow-x: auto; }
+    .token-rollup-item { background: #0e0e17; border: 1px solid #1a1a2e; border-radius: 8px; padding: 10px; }
+    .token-rollup-item .label { color: #666; font-size: 10px; }
+    .token-rollup-item .value { margin-top: 4px; color: #ddd; font-size: 15px; font-weight: 650; font-variant-numeric: tabular-nums; }
 .conv-turns { flex: 1; overflow-y: auto; padding: 0 20px; }
 .conv-turn { border-bottom: 1px solid #111; padding: 16px 0; }
 .conv-turn-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -271,7 +331,7 @@
       <a href="#" class="active" data-page="dashboard"><span class="icon">📊</span> Dashboard</a>
       <a href="#" data-page="mode"><span class="icon">🔄</span> 模式切换</a>
       <a href="#" data-page="providers"><span class="icon">🤖</span> 模型管理</a>
-      <a href="#" data-page="keys"><span class="icon">🔑</span> API Keys</a>
+      <a href="#" data-page="keys"><span class="icon">🔑</span> 凭据管理</a>
       <a href="#" data-page="logs"><span class="icon">📋</span> 请求日志</a>
       <a href="#" data-page="conversations"><span class="icon">💬</span> 会话管理</a>
       <a href="#" data-page="backups"><span class="icon">💾</span> 备份管理</a>
@@ -291,7 +351,43 @@
         <div class="stat-card"><div class="label">今日请求</div><div class="value" id="stat-requests">-</div><div class="sub">total requests</div></div>
         <div class="stat-card green"><div class="label">成功率</div><div class="value" id="stat-success">-</div><div class="sub">success rate</div></div>
         <div class="stat-card orange"><div class="label">平均延迟</div><div class="value" id="stat-latency">-</div><div class="sub">avg latency</div></div>
-        <div class="stat-card"><div class="label">Token 用量</div><div class="value" id="stat-tokens">-</div><div class="sub">total tokens</div></div>
+        <div class="stat-card"><div class="label">Token 用量</div><div class="value" id="stat-tokens">-</div><div class="sub">upstream reported</div></div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <h3>Token 核账统计</h3>
+          <select id="token-range" onchange="loadTokenStats(this.value)">
+            <option value="24h">最近 24 小时</option>
+            <option value="7d" selected>最近 7 天</option>
+            <option value="30d">最近 30 天</option>
+            <option value="all">全部</option>
+          </select>
+        </div>
+        <div class="token-panel-grid">
+          <div class="token-canvas-wrap">
+            <canvas id="token-chart" aria-label="Token 统计图"></canvas>
+            <div class="token-legend">
+              <span style="--legend-color:#4fc3f7;">上游实际</span>
+              <span style="--legend-color:#ffb74d;">本地估算</span>
+            </div>
+          </div>
+          <div class="token-summary" id="token-summary">
+            <div class="token-summary-item"><div class="label">上游实际输入</div><div class="value actual" id="token-actual-input">-</div></div>
+            <div class="token-summary-item"><div class="label">上游实际输出</div><div class="value actual" id="token-actual-output">-</div></div>
+            <div class="token-summary-item"><div class="label">缓存输入</div><div class="value" id="token-cached">-</div></div>
+            <div class="token-summary-item"><div class="label">推理输出</div><div class="value" id="token-reasoning">-</div></div>
+            <div class="token-summary-item"><div class="label">本地估算总量</div><div class="value estimated" id="token-estimated">-</div></div>
+            <div class="token-summary-item"><div class="label">实际 − 估算</div><div class="value" id="token-variance">-</div></div>
+            <div class="token-summary-item"><div class="label">有上游用量的请求</div><div class="value" id="token-usage-rows">-</div></div>
+            <div class="token-summary-item"><div class="label">缺少上游用量</div><div class="value" id="token-missing-usage">-</div></div>
+          </div>
+        </div>
+        <div class="token-table-wrap">
+          <table class="token-table">
+            <thead><tr><th>时间</th><th>请求</th><th>实际上游</th><th>本地估算</th><th>差值</th><th>缓存</th><th>推理</th></tr></thead>
+            <tbody id="token-table-body"><tr><td colspan="7">加载中...</td></tr></tbody>
+          </table>
+        </div>
       </div>
       <div class="card">
         <div class="card-header"><h3>最近请求</h3></div>
@@ -331,10 +427,12 @@
           </div>
           <div style="border-left:1px solid #222;padding-left:24px;">
             <select id="openai-model">
-              <option value="gpt-5.6-sol">GPT-5.6 Sol</option>
-              <option value="gpt-5.6-terra">GPT-5.6 Terra</option>
+              <option value="gpt-6-luna" selected>GPT-6 Luna（Free/Go 推荐）</option>
+              <option value="gpt-6-sol">GPT-6 Sol（付费计划可用时）</option>
               <option value="gpt-5.6-luna">GPT-5.6 Luna</option>
-              <option value="gpt-5.5">GPT-5.5</option>
+              <option value="gpt-5.6-terra">GPT-5.6 Terra</option>
+              <option value="gpt-5.6-sol">GPT-5.6 Sol</option>
+              <option value="gpt-5.5" disabled>GPT-5.5（2026-10-14 退役）</option>
             </select>
             <br>
             <div id="oauth-status" style="width:280px;margin-bottom:8px;color:#888;font-size:12px;">检查登录状态...</div>
@@ -389,14 +487,14 @@
       <div class="provider-grid" id="provider-grid"></div>
     </div>
 
-    <!-- API Keys -->
+    <!-- Provider credentials -->
     <div class="page" id="page-keys">
       <div class="page-header">
-        <h2>API Keys</h2>
-        <p>管理各厂商的 API 密钥（AES-256 加密存储）</p>
+        <h2>Provider 凭据</h2>
+        <p>随时修改 Base URL 和 API Key；保存后下一次请求立即生效，历史记录加密保存</p>
       </div>
       <div class="card">
-        <div class="key-grid" id="key-grid"></div>
+        <div class="credential-grid" id="credential-grid"></div>
       </div>
     </div>
 
@@ -426,6 +524,10 @@
     <div class="conv-split-left">
       <div class="conv-list" id="conv-list">
         <div class="conv-empty"><div class="icon">💬</div><p>加载中...</p></div>
+      </div>
+      <div style="padding:10px;text-align:center;border-top:1px solid #1a1a2e;">
+        <button id="conv-load-more" class="btn btn-secondary btn-sm" style="display:none;" onclick="loadMoreConversations()">加载更多会话</button>
+        <div id="conv-page-info" style="font-size:11px;color:#555;margin-top:6px;"></div>
       </div>
     </div>
     <div class="conv-split-right">
@@ -459,6 +561,10 @@
     let fallbackSettings = null;
     let visionFallbackSettings = null;
     let visionFallbackProviders = [];
+    let credentialCurrent = {};
+    let credentialFullKeys = new Map();
+    let credentialKeyDirty = new Map();
+    let credentialHistoryOpen = new Set();
 
     // Navigation
     document.querySelectorAll('.sidebar nav a').forEach(a => {
@@ -487,10 +593,49 @@
 
     // Load providers
     async function loadProviders() {
+      const credentialGrid = document.getElementById('credential-grid');
+      credentialGrid.innerHTML = '<div class="credential-card">正在加载 Provider 凭据...</div>';
       providers = await api('/providers');
+      const domesticProvider = document.getElementById('domestic-provider');
+      const previousDomestic = domesticProvider.value;
+      domesticProvider.innerHTML = providers.map(p =>
+        `<option value="${p.id}">${p.displayName || p.id}${p.access ? ' [' + accessScope(p) + ']' : ''}</option>`
+      ).join('');
+      if (previousDomestic && providers.some(p => p.id === previousDomestic)) domesticProvider.value = previousDomestic;
       renderProviders();
       renderDomesticModels();
-      renderKeys();
+      await renderKeys();
+    }
+
+    function accessScope(p) {
+      if (p.access === 'token_plan') return 'Token Plan';
+      if (p.access === 'payg') return '按量付费';
+      return '';
+    }
+
+    function modelScope(m) {
+      if (!m.access || m.access.length > 1) return '';
+      return m.access[0] === 'token_plan' ? 'TP' : 'PAYG';
+    }
+
+    function modelTooltip(m) {
+      const bits = [];
+      if (m.supportsImages) bits.push('支持图片输入');
+      else bits.push('不支持图片：传图将自动回退到多模态模型');
+      if (m.supportsReasoning) bits.push('思考/推理');
+      if (m.contextWindow) bits.push('上下文 ' + Math.round(m.contextWindow / 1000) + 'K');
+      if (m.maxInputTokens) bits.push('最大输入 ' + m.maxInputTokens);
+      if (m.maxOutputTokens) bits.push('最大输出 ' + m.maxOutputTokens);
+      if (m.routeName) bits.push('调用名 ' + m.routeName);
+      if (m.note) bits.push(m.note);
+      return bits.join(' · ');
+    }
+
+    function modelOptionLabel(m, provider) {
+      const caps = (m.supportsImages ? ' 📷' : '') + (m.supportsReasoning ? ' 💭' : '');
+      const hosted = m.routeName ? '（经' + (provider ? provider.displayName : '网关') + '）' : '';
+      const scope = modelScope(m);
+      return (m.displayName || m.id) + caps + hosted + (scope ? ' [' + scope + ']' : '');
     }
 
     function renderProviders() {
@@ -501,12 +646,20 @@
             <span class="name">${p.displayName}</span>
             <span class="shortcut">${p.shortcut}</span>
           </div>
+          <div class="provider-meta">
+            <span class="mode-badge ${p.hasKey ? 'ok' : 'warn'}">${p.hasKey ? '已配置密钥' : '未配置密钥'}</span>
+            ${p.access ? '<span class="mode-badge ' + (p.access === 'token_plan' ? 'plan' : 'payg') + '">' + accessScope(p) + '</span>' : ''}
+            <span class="mode-badge">${p.models.length} 个可用模型</span>
+          </div>
           <div class="default">默认: ${p.defaultModel}</div>
+          ${p.baseUrl ? '<div class="provider-endpoint">' + p.baseUrl + '</div>' : ''}
           <div class="model-tags">
             ${p.models.map(m => `
-              <span class="model-tag ${m.supportsImages ? 'vision' : ''} ${m.deprecatedAfter ? 'deprecated' : ''}">
+              <span class="model-tag ${m.supportsImages ? 'vision' : ''} ${m.routeName ? 'hosted' : ''}" title="${modelTooltip(m)}">
                 <span class="dot"></span>${m.id}
-                ${m.supportsImages ? ' 📷' : ''}
+                ${m.supportsImages ? '<span class="cap">📷</span>' : ''}
+                ${m.routeName ? '<span class="cap">网关</span>' : ''}
+                ${modelScope(m) ? '<span class="scope">' + modelScope(m) + '</span>' : ''}
               </span>
             `).join('')}
           </div>
@@ -518,9 +671,10 @@
       const sel = document.getElementById('domestic-model');
       const provider = document.getElementById('domestic-provider').value;
       const p = providers.find(x => x.id === provider);
-      sel.innerHTML = p ? p.models.filter(m => !m.deprecatedAfter).map(m =>
-        `<option value="${m.id}">${m.displayName || m.id}${m.supportsImages ? ' 📷' : ''}</option>`
+      sel.innerHTML = p ? p.models.map(m =>
+        `<option value="${m.id}">${modelOptionLabel(m, p)}</option>`
       ).join('') : '';
+      if (p && !p.models.length) sel.innerHTML = '<option value="">当前计费模式无可用模型</option>';
     }
 
     document.getElementById('domestic-provider').addEventListener('change', renderDomesticModels);
@@ -531,7 +685,7 @@
       const modelSelect = document.getElementById("fallback-model");
       const provider = providers.find(x => x.id === providerId);
       modelSelect.innerHTML = provider ? provider.models.map(m =>
-        `<option value="${m.id}">${m.displayName || m.id}${m.supportsImages ? " 📷" : ""}</option>`
+        `<option value="${m.id}">${modelOptionLabel(m, provider)}</option>`
       ).join("") : "";
       if (selectedModel && Array.from(modelSelect.options).some(o => o.value === selectedModel)) {
         modelSelect.value = selectedModel;
@@ -595,7 +749,7 @@
       const modelSelect = document.getElementById("vision-fallback-model");
       const provider = visionFallbackProviders.find(x => x.id === providerId);
       modelSelect.innerHTML = provider ? provider.models.map(m =>
-        `<option value="${m.id}">${m.displayName || m.id} 📷</option>`
+        `<option value="${m.id}">${modelOptionLabel(m, provider)}</option>`
       ).join("") : "";
       if (selectedModel && Array.from(modelSelect.options).some(o => o.value === selectedModel)) {
         modelSelect.value = selectedModel;
@@ -646,36 +800,205 @@
 
     document.getElementById("vision-fallback-provider").addEventListener("change", () => renderVisionFallbackModels());
 
-    // Keys
+    // Provider credentials
     async function renderKeys() {
-      const keys = await api('/keys');
-      const grid = document.getElementById('key-grid');
-      const providers_meta = [
-        { id: 'mimo', name: 'MiMo', env: 'MIMO_API_KEY', docs: 'https://platform.xiaomimimo.com/#/console/api-keys' },
-        { id: 'deepseek', name: 'DeepSeek', env: 'DEEPSEEK_API_KEY', docs: 'https://platform.deepseek.com/api_keys' },
-        { id: 'qwen', name: '通义千问', env: 'DASHSCOPE_API_KEY', docs: 'https://help.aliyun.com/zh/dashscope/' },
-        { id: 'zhipu', name: '智谱 GLM', env: 'ZHIPU_API_KEY', docs: 'https://open.bigmodel.cn/dev/api' },
-        { id: 'kimi', name: 'Kimi', env: 'KIMI_API_KEY', docs: 'https://platform.kimi.com/docs' },
-        { id: 'openai', name: 'OpenAI', env: 'OPENAI_API_KEY', docs: 'https://platform.openai.com/api-keys' },
-      ];
-      grid.innerHTML = providers_meta.map(p => `
-        <div class="key-row">
-          <label>${p.name}</label>
-          <input type="password" id="key-${p.id}" placeholder="${p.env}" value="${keys[p.id] || ''}">
-          <button class="btn btn-secondary btn-sm" onclick="saveKey('${p.id}')">保存</button>
-          <span class="saved" id="saved-${p.id}">✓ 已保存</span>
-          <a href="${p.docs}" target="_blank" style="color:#666;font-size:11px;text-decoration:none;">获取 Key →</a>
-        </div>
-      `).join('');
+      const grid = document.getElementById('credential-grid');
+      const providerMeta = [...providers];
+      if (!providerMeta.some(p => p.id === 'openai')) {
+        providerMeta.push({ id: 'openai', displayName: 'OpenAI' });
+      }
+      const currentResults = await Promise.all(providerMeta.map(async p => {
+        try {
+          return await api(`/providers/${encodeURIComponent(p.id)}/credentials/current`);
+        } catch {
+          return null;
+        }
+      }));
+
+      grid.innerHTML = providerMeta.map((p, index) => {
+        const current = currentResults[index];
+        if (!current) return '';
+        credentialCurrent[p.id] = current;
+        const historyOpen = credentialHistoryOpen.has(p.id);
+        return `
+          <div class="credential-card" id="credential-card-${escapeHtml(p.id)}">
+            <div class="credential-head">
+              <span class="provider-name">${escapeHtml(p.displayName || p.id)}</span>
+              <div class="credential-sources">
+                <span class="source-badge">Base: ${escapeHtml(current.baseUrlSource)}</span>
+                <span class="source-badge">Key: ${escapeHtml(current.apiKeySource)}</span>
+              </div>
+            </div>
+            <div class="credential-fields">
+              <div class="credential-field">
+                <label>当前 Base URL</label>
+                <input id="base-url-${escapeHtml(p.id)}" value="${escapeHtml(current.baseUrl)}" spellcheck="false">
+              </div>
+              <div class="credential-field">
+                <label>当前 API Key（默认隐藏）</label>
+                <input id="credential-key-${escapeHtml(p.id)}" type="password"
+                  placeholder="${escapeHtml(current.apiKeyMasked || '未设置')}" autocomplete="off" spellcheck="false">
+              </div>
+            </div>
+            <div class="credential-actions">
+              <button class="btn btn-primary btn-sm" data-credential-action="save" data-provider="${escapeHtml(p.id)}">保存并立即生效</button>
+              <button class="btn btn-secondary btn-sm" data-credential-action="reveal" data-provider="${escapeHtml(p.id)}">显示完整 Key</button>
+              <button class="btn btn-secondary btn-sm" data-credential-action="history" data-provider="${escapeHtml(p.id)}">${historyOpen ? '收起历史' : '查看历史'}</button>
+            </div>
+            <div class="history-panel ${historyOpen ? 'open' : ''}" id="history-${escapeHtml(p.id)}"></div>
+          </div>
+        `;
+      }).join('');
+
+      grid.querySelectorAll('[data-credential-action]').forEach(button => {
+        button.addEventListener('click', () => {
+          const action = button.dataset.credentialAction;
+          const providerId = button.dataset.provider;
+          if (action === 'save') saveCredential(providerId);
+          if (action === 'reveal') revealCredential(providerId);
+          if (action === 'history') toggleCredentialHistory(providerId);
+        });
+      });
+
+      providerMeta.forEach(p => {
+        const keyInput = document.getElementById('credential-key-' + p.id);
+        if (keyInput) {
+          keyInput.addEventListener('input', () => {
+            const fullKey = credentialFullKeys.get(p.id) || '';
+            credentialKeyDirty.set(p.id, keyInput.value !== fullKey);
+          });
+        }
+      });
+
+      for (const providerId of credentialHistoryOpen) {
+        await loadCredentialHistory(providerId, false);
+      }
     }
 
-    async function saveKey(providerId) {
-      const val = document.getElementById('key-' + providerId).value;
-      await api('/keys', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ providerId, apiKey: val }) });
-      const s = document.getElementById('saved-' + providerId);
-      s.classList.add('show');
-      setTimeout(() => s.classList.remove('show'), 2000);
-      toast('已保存 ' + providerId + ' API Key');
+    async function saveCredential(providerId) {
+      const current = credentialCurrent[providerId];
+      const baseUrlInput = document.getElementById('base-url-' + providerId);
+      const keyInput = document.getElementById('credential-key-' + providerId);
+      const body = {};
+      const baseUrl = baseUrlInput ? baseUrlInput.value.trim() : '';
+      if (baseUrl && baseUrl !== current.baseUrl) body.baseUrl = baseUrl;
+      if (keyInput && credentialKeyDirty.get(providerId) && keyInput.value.trim()) {
+        body.apiKey = keyInput.value.trim();
+      }
+      if (!Object.keys(body).length) {
+        toast('没有检测到 Base URL 或 API Key 变化');
+        return;
+      }
+      const result = await api(`/providers/${encodeURIComponent(providerId)}/credentials`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!result.success) {
+        toast(result.message || '保存失败');
+        return;
+      }
+      credentialCurrent[providerId] = result.current;
+      credentialFullKeys.delete(providerId);
+      credentialKeyDirty.delete(providerId);
+      toast('已保存，下一次请求立即生效');
+      await renderKeys();
+    }
+
+    async function revealCredential(providerId) {
+      const result = await api(`/providers/${encodeURIComponent(providerId)}/credentials/current?reveal=1`);
+      if (!result.apiKey) {
+        toast('当前没有可显示的 API Key');
+        return;
+      }
+      credentialFullKeys.set(providerId, result.apiKey);
+      credentialKeyDirty.set(providerId, false);
+      const input = document.getElementById('credential-key-' + providerId);
+      if (input) {
+        input.type = 'text';
+        input.value = result.apiKey;
+        input.placeholder = '已显示完整 Key';
+      }
+    }
+
+    async function toggleCredentialHistory(providerId) {
+      if (credentialHistoryOpen.has(providerId)) {
+        credentialHistoryOpen.delete(providerId);
+        const panel = document.getElementById('history-' + providerId);
+        if (panel) panel.classList.remove('open');
+        const button = document.querySelector(`[data-credential-action="history"][data-provider="${CSS.escape(providerId)}"]`);
+        if (button) button.textContent = '查看历史';
+        return;
+      }
+      credentialHistoryOpen.add(providerId);
+      await loadCredentialHistory(providerId, false);
+      const panel = document.getElementById('history-' + providerId);
+      if (panel) panel.classList.add('open');
+      const button = document.querySelector(`[data-credential-action="history"][data-provider="${CSS.escape(providerId)}"]`);
+      if (button) button.textContent = '收起历史';
+    }
+
+    async function loadCredentialHistory(providerId, reveal) {
+      const panel = document.getElementById('history-' + providerId);
+      if (!panel) return;
+      const suffix = reveal ? '?reveal=1' : '';
+      const history = await api(`/providers/${encodeURIComponent(providerId)}/credentials/history${suffix}`);
+      if (!Array.isArray(history)) {
+        panel.innerHTML = '<div style="color:#f08080;font-size:12px;">历史记录加载失败</div>';
+        return;
+      }
+      panel.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;">
+          <strong style="font-size:13px;">凭据历史</strong>
+          <button class="btn btn-secondary btn-sm" data-reveal-history="${escapeHtml(providerId)}">
+            ${reveal ? '隐藏历史 Key' : '显示完整历史 Key'}
+          </button>
+        </div>
+        <table class="history-table">
+          <thead><tr><th>时间</th><th>Base URL</th><th>API Key</th><th>来源</th><th>状态</th><th>操作</th></tr></thead>
+          <tbody>
+            ${history.map(row => {
+              const action = row.isActive ? '—'
+                : '<button class="btn btn-secondary btn-sm" data-activate-credential="' + row.id + '" data-provider="' + escapeHtml(providerId) + '">用这一条</button>';
+              return `
+              <tr>
+                <td>${new Date(row.changedAt).toLocaleString('zh-CN')}</td>
+                <td>${escapeHtml(row.baseUrl)}</td>
+                <td>${escapeHtml(reveal && row.apiKey ? row.apiKey : (row.apiKeyMasked || '未设置'))}</td>
+                <td>${escapeHtml(row.source)}</td>
+                <td class="${row.isActive ? 'active-history' : ''}">${row.isActive ? '当前生效' : '历史'}</td>
+                <td>${action}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      `;
+      const revealButton = panel.querySelector('[data-reveal-history]');
+      if (revealButton) {
+        revealButton.addEventListener('click', () => loadCredentialHistory(providerId, !reveal));
+      }
+      panel.querySelectorAll('[data-activate-credential]').forEach(button => {
+        button.addEventListener('click', () => {
+          activateCredential(providerId, Number(button.dataset.activateCredential));
+        });
+      });
+    }
+
+    async function activateCredential(providerId, historyId) {
+      const result = await api(`/providers/${encodeURIComponent(providerId)}/credentials/${historyId}/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
+      if (!result.success) {
+        toast(result.message || '切换失败');
+        return;
+      }
+      credentialCurrent[providerId] = result.current;
+      credentialFullKeys.delete(providerId);
+      credentialKeyDirty.delete(providerId);
+      toast('已切换到该凭据，下一次请求立即生效');
+      await renderKeys();
     }
 
     // Mode
@@ -954,6 +1277,11 @@
       const list = document.getElementById('log-list');
       const dashList = document.getElementById('dashboard-logs');
       logTotalStats = data.stats;
+      const stats = data.stats || {};
+      const tokenStats = stats.token || {};
+      document.getElementById('stat-requests').textContent = stats.todayRequests ?? 0;
+      document.getElementById('stat-success').textContent = stats.errorRate == null ? '-' : Math.round(100 - stats.errorRate) + '%';
+      document.getElementById('stat-tokens').textContent = fmtTokens(tokenStats.total_tokens ?? stats.totalTokens ?? 0);
       if (!data.logs || data.logs.length === 0) {
         if (logOffset === 0) {
           list.innerHTML = '<div class="empty"><div class="icon">\u{1F4CB}</div>\u6682\u65E0\u8BF7\u6C42\u65E5\u5FD7</div>';
@@ -976,7 +1304,7 @@
             <span class="provider">${l.provider_id}</span>
             <span class="model">${l.upstream_model || l.client_model || '-'}</span>
             <span class="duration">${l.duration_ms}ms</span>
-            <span class="tokens">${l.total_tokens ? l.total_tokens + ' tok' : ''}</span>
+            <span class="tokens" title="上游实际 / 本地估算">${l.total_tokens ? fmtTokens(l.total_tokens) : '0'} / ${fmtTokens(l.estimated_total_tokens || 0)}</span>
             <span class="stream-badge">${l.stream ? '\u26A1\u6D41\u5F0F' : '\u{1F4DD}'}</span>
           </div>
           <div class="log-detail">
@@ -1015,11 +1343,114 @@
       const total = data.logs.length;
       const success = data.logs.filter(l => l.status_code < 400).length;
       const avgLatency = total > 0 ? Math.round(data.logs.reduce((a, l) => a + (l.duration_ms || 0), 0) / total) : 0;
-      const totalTokens = data.logs.reduce((a, l) => a + (l.total_tokens || 0), 0);
-      document.getElementById('stat-requests').textContent = total;
-      document.getElementById('stat-success').textContent = total > 0 ? Math.round(success / total * 100) + '%' : '-';
       document.getElementById('stat-latency').textContent = avgLatency + 'ms';
-      document.getElementById('stat-tokens').textContent = totalTokens > 1000 ? (totalTokens / 1000).toFixed(1) + 'K' : totalTokens;
+      if (data.logs.length > 0 && stats.errorRate == null) {
+        document.getElementById('stat-success').textContent = Math.round(success / total * 100) + '%';
+      }
+    }
+
+    let latestTokenStats = null;
+    let tokenChartResizeTimer = null;
+
+    function formatTokenBucket(bucket, compact) {
+      const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2})$/.exec(bucket || '');
+      if (!match) return bucket || '-';
+      if (compact) return match[4] + ':00';
+      return match[1] + '-' + match[2] + '-' + match[3] + ' ' + match[4] + ':00';
+    }
+
+    async function loadTokenStats(range) {
+      const selectedRange = range || document.getElementById('token-range').value || '7d';
+      const bucket = selectedRange === '24h' ? 'hour' : 'day';
+      const data = await api('/token-stats?range=' + encodeURIComponent(selectedRange) + '&bucket=' + bucket);
+      latestTokenStats = data;
+      const s = data.summary || {};
+      document.getElementById('token-actual-input').textContent = fmtTokens(s.prompt_tokens || 0);
+      document.getElementById('token-actual-output').textContent = fmtTokens(s.completion_tokens || 0);
+      document.getElementById('token-cached').textContent = fmtTokens(s.cached_tokens || 0);
+      document.getElementById('token-reasoning').textContent = fmtTokens(s.reasoning_tokens || 0);
+      document.getElementById('token-estimated').textContent = fmtTokens(s.estimated_total_tokens || 0);
+      const variance = document.getElementById('token-variance');
+      const varianceValue = s.variance_tokens || 0;
+      variance.textContent = (varianceValue > 0 ? '+' : '') + fmtTokens(varianceValue);
+      variance.className = 'value ' + (varianceValue >= 0 ? 'positive' : 'negative');
+      document.getElementById('token-usage-rows').textContent = (s.usage_rows || 0) + ' / ' + (s.requests || 0);
+      document.getElementById('token-missing-usage').textContent = s.missing_usage_rows || 0;
+
+      const points = data.points || [];
+      document.getElementById('token-table-body').innerHTML = points.length
+        ? points.slice().reverse().map(p => {
+            const variancePoint = p.variance_tokens || 0;
+            return '<tr>' +
+              '<td>' + escHtml(formatTokenBucket(p.bucket, false)) + '</td>' +
+              '<td>' + p.requests + '</td>' +
+              '<td class="actual">' + fmtTokens(p.total_tokens || 0) + '</td>' +
+              '<td class="estimated">' + fmtTokens(p.estimated_total_tokens || 0) + '</td>' +
+              '<td class="' + (variancePoint >= 0 ? 'positive' : 'negative') + '">' + (variancePoint > 0 ? '+' : '') + fmtTokens(variancePoint) + '</td>' +
+              '<td>' + fmtTokens(p.cached_tokens || 0) + '</td>' +
+              '<td>' + fmtTokens(p.reasoning_tokens || 0) + '</td>' +
+            '</tr>';
+          }).join('')
+        : '<tr><td colspan="7">所选时间范围内没有数据</td></tr>';
+      drawTokenChart(points);
+    }
+
+    function drawTokenChart(sourcePoints) {
+      const canvas = document.getElementById('token-chart');
+      if (!canvas) return;
+      const points = (sourcePoints || []).slice(-45);
+      const ratio = window.devicePixelRatio || 1;
+      const width = Math.max(320, canvas.clientWidth || canvas.parentElement.clientWidth || 640);
+      const height = 280;
+      canvas.width = Math.round(width * ratio);
+      canvas.height = Math.round(height * ratio);
+      canvas.style.height = height + 'px';
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+      const pad = { left: 58, right: 18, top: 14, bottom: 54 };
+      const chartWidth = width - pad.left - pad.right;
+      const chartHeight = height - pad.top - pad.bottom;
+      ctx.font = '11px Segoe UI';
+      ctx.textBaseline = 'middle';
+      if (!points.length) {
+        ctx.fillStyle = '#555';
+        ctx.textAlign = 'center';
+        ctx.fillText('暂无 Token 数据', width / 2, height / 2);
+        return;
+      }
+      const maxValue = Math.max(1, ...points.map(p => Math.max(p.total_tokens || 0, p.estimated_total_tokens || 0)));
+      ctx.strokeStyle = '#1f1f31';
+      ctx.fillStyle = '#666';
+      ctx.textAlign = 'right';
+      for (let i = 0; i <= 4; i++) {
+        const y = pad.top + chartHeight * i / 4;
+        ctx.beginPath();
+        ctx.moveTo(pad.left, y);
+        ctx.lineTo(width - pad.right, y);
+        ctx.stroke();
+        const value = maxValue * (1 - i / 4);
+        ctx.fillText(fmtTokens(Math.round(value)), pad.left - 8, y);
+      }
+      const slot = chartWidth / points.length;
+      const barWidth = Math.max(3, Math.min(14, slot * 0.3));
+      const maxLabels = Math.max(4, Math.floor(chartWidth / 72));
+      const labelEvery = Math.max(1, Math.ceil(points.length / maxLabels));
+      const hourly = points.some(point => String(point.bucket || '').includes('T'));
+      points.forEach((point, index) => {
+        const center = pad.left + slot * index + slot / 2;
+        const actualHeight = (point.total_tokens || 0) / maxValue * chartHeight;
+        const estimatedHeight = (point.estimated_total_tokens || 0) / maxValue * chartHeight;
+        ctx.fillStyle = '#4fc3f7';
+        ctx.fillRect(center - barWidth - 1, pad.top + chartHeight - actualHeight, barWidth, actualHeight);
+        ctx.fillStyle = '#ffb74d';
+        ctx.fillRect(center + 1, pad.top + chartHeight - estimatedHeight, barWidth, estimatedHeight);
+        if (index % labelEvery === 0 || index === points.length - 1) {
+          ctx.fillStyle = '#666';
+          ctx.textAlign = 'center';
+          ctx.fillText(formatTokenBucket(point.bucket, hourly), center, height - 16);
+        }
+      });
     }
 
     // Backups
@@ -1065,9 +1496,10 @@
 
     // Page loader
     function loadPage(page) {
+      if (page === 'dashboard') { loadLogs(false); loadTokenStats(); }
       if (page === 'mode') { loadMode(); loadFallback(); loadVisionFallback(); }
       if (page === 'logs') { loadConversations(); loadLogs(); }
-    if (page === 'conversations') { loadConversations2(); }
+      if (page === 'conversations') { loadConversations2(true); }
       if (page === 'backups') loadBackups();
     }
 
@@ -1078,17 +1510,28 @@
     // Conversation Management
 let currentConvId = null;
 
-async function loadConversations2() {
-  var data = await api('/conversations?limit=100');
+let convOffset = 0;
+let convTotal = 0;
+
+async function loadConversations2(reset) {
+  const shouldReset = reset !== false;
+  if (shouldReset) convOffset = 0;
+  var data = await api('/conversations?limit=100&offset=' + convOffset);
   var list = document.getElementById('conv-list');
+  convTotal = data.total || 0;
   if (!data.conversations || data.conversations.length === 0) {
-    list.innerHTML = '<div class="conv-empty"><div class="icon">&#x1f4ac;</div><p>暂无会话记录</p></div>';
+    if (shouldReset) {
+      list.innerHTML = '<div class="conv-empty"><div class="icon">&#x1f4ac;</div><p>暂无会话记录</p></div>';
+      document.getElementById('conv-load-more').style.display = 'none';
+      document.getElementById('conv-page-info').textContent = '';
+    }
     return;
   }
-  list.innerHTML = data.conversations.map(function(c) {
+  const items = data.conversations.map(function(c) {
     var time = new Date(c.last_ts).toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
     var firstTime = new Date(c.first_ts).toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
     var preview = (c.last_user_message || '').substring(0, 60).replace(/</g, '&lt;');
+    if (!preview) preview = '会话 ' + String(c.thread_id || '').substring(0, 12);
     return '<div class="conv-item" onclick="openConversation(this, \'' + c.thread_id + '\')">' +
       '<div class="conv-icon">&#x1f4ac;</div>' +
       '<div class="conv-info">' +
@@ -1096,12 +1539,24 @@ async function loadConversations2() {
         '<div class="conv-meta">' +
           '<span>' + firstTime + '</span>' +
           '<span class="conv-count">' + c.message_count + '轮</span>' +
-          '<span class="conv-tokens">' + fmtTokens(c.total_tokens) + '</span>' +
+          '<span class="conv-tokens">实际 ' + fmtTokens(c.total_tokens || 0) + '</span>' +
+          '<span class="conv-estimate">估 ' + fmtTokens(c.estimated_total_tokens || 0) + '</span>' +
           (c.total_errors > 0 ? '<span class="conv-errors">' + c.total_errors + '错</span>' : '') +
         '</div>' +
       '</div>' +
     '</div>';
   }).join('');
+  if (shouldReset || list.querySelector('.conv-empty')) list.innerHTML = items;
+  else list.insertAdjacentHTML('beforeend', items);
+  convOffset += data.conversations.length;
+  const more = document.getElementById('conv-load-more');
+  const info = document.getElementById('conv-page-info');
+  more.style.display = convOffset < convTotal ? 'block' : 'none';
+  info.textContent = convTotal ? ('已加载 ' + convOffset + ' / ' + convTotal + ' 个会话') : '';
+}
+
+function loadMoreConversations() {
+  loadConversations2(false);
 }
 
 async function openConversation(el, threadId) {
@@ -1118,6 +1573,15 @@ async function openConversation(el, threadId) {
   var logs = data.logs || [];
   var firstLog = logs[0] || {};
   var totalTokens = logs.reduce(function(a, l) { return a + (l.total_tokens || 0); }, 0);
+  var actualInput = logs.reduce(function(a, l) { return a + (l.prompt_tokens || 0); }, 0);
+  var actualOutput = logs.reduce(function(a, l) { return a + (l.completion_tokens || 0); }, 0);
+  var cachedTokens = logs.reduce(function(a, l) { return a + (l.cached_tokens || 0); }, 0);
+  var reasoningTokens = logs.reduce(function(a, l) { return a + (l.reasoning_tokens || 0); }, 0);
+  var estimatedInput = logs.reduce(function(a, l) { return a + (l.estimated_prompt_tokens || 0); }, 0);
+  var estimatedOutput = logs.reduce(function(a, l) { return a + (l.estimated_completion_tokens || 0); }, 0);
+  var estimatedTotal = logs.reduce(function(a, l) { return a + (l.estimated_total_tokens || 0); }, 0);
+  var usageRows = logs.filter(function(l) { return l.total_tokens != null; }).length;
+  var varianceTokens = totalTokens - estimatedTotal;
   var totalDuration = logs.reduce(function(a, l) { return a + (l.duration_ms || 0); }, 0);
   var errorCount = logs.filter(function(l) { return l.status_code >= 400; }).length;
   var h = '<div class="conv-detail">';
@@ -1126,9 +1590,34 @@ async function openConversation(el, threadId) {
   h += '<div class="conv-detail-meta">';
   h += '<span>模型: ' + (firstLog.upstream_model || firstLog.client_model || '-') + '</span> | ';
   h += '<span>总耗时: ' + Math.round(totalDuration/1000) + 's</span> | ';
-  h += '<span>总 tokens: ' + fmtTokens(totalTokens) + '</span>';
+  h += '<span>上游实际: ' + fmtTokens(totalTokens) + '</span> | ';
+  h += '<span>本地估算: ' + fmtTokens(estimatedTotal) + '</span>';
   if (errorCount > 0) h += ' | <span style="color:#f44336">' + errorCount + ' 个错误</span>';
   h += '</div></div>';
+  h += '<div class="token-rollup">';
+  h += '<div class="token-rollup-item"><div class="label">上游输入</div><div class="value">' + fmtTokens(actualInput) + '</div></div>';
+  h += '<div class="token-rollup-item"><div class="label">上游输出</div><div class="value">' + fmtTokens(actualOutput) + '</div></div>';
+  h += '<div class="token-rollup-item"><div class="label">缓存输入</div><div class="value">' + fmtTokens(cachedTokens) + '</div></div>';
+  h += '<div class="token-rollup-item"><div class="label">推理输出</div><div class="value">' + fmtTokens(reasoningTokens) + '</div></div>';
+  h += '<div class="token-rollup-item"><div class="label">本地估算输入 / 输出</div><div class="value">' + fmtTokens(estimatedInput) + ' / ' + fmtTokens(estimatedOutput) + '</div></div>';
+  h += '<div class="token-rollup-item"><div class="label">实际 − 估算（有用量 ' + usageRows + '轮）</div><div class="value ' + (varianceTokens >= 0 ? 'positive' : 'negative') + '">' + (varianceTokens > 0 ? '+' : '') + fmtTokens(varianceTokens) + '</div></div>';
+  h += '</div>';
+  h += '<div class="token-table-wrap" style="padding:0 20px 14px;">';
+  h += '<table class="token-table"><thead><tr><th>时间</th><th>模型</th><th>实际上游输入</th><th>实际上游输出</th><th>实际上游总量</th><th>本地估算总量</th><th>差值</th><th>耗时</th></tr></thead><tbody>';
+  logs.forEach(function(log) {
+    var rowVariance = (log.total_tokens || 0) - (log.estimated_total_tokens || 0);
+    h += '<tr>' +
+      '<td>' + new Date(log.ts).toLocaleTimeString('zh-CN') + '</td>' +
+      '<td>' + escHtml(log.upstream_model || log.client_model || '-') + '</td>' +
+      '<td class="actual">' + fmtTokens(log.prompt_tokens || 0) + '</td>' +
+      '<td class="actual">' + fmtTokens(log.completion_tokens || 0) + '</td>' +
+      '<td class="actual">' + fmtTokens(log.total_tokens || 0) + '</td>' +
+      '<td class="estimated">' + fmtTokens(log.estimated_total_tokens || 0) + '</td>' +
+      '<td class="' + (rowVariance >= 0 ? 'positive' : 'negative') + '">' + (rowVariance > 0 ? '+' : '') + fmtTokens(rowVariance) + '</td>' +
+      '<td>' + (log.duration_ms || 0) + 'ms</td>' +
+    '</tr>';
+  });
+  h += '</tbody></table></div>';
   h += '<div class="conv-turns">';
   logs.forEach(function(log) {
     var time = new Date(log.ts).toLocaleTimeString('zh-CN');
@@ -1139,7 +1628,7 @@ async function openConversation(el, threadId) {
     h += '<span class="conv-turn-badge user">User</span>';
     h += '<span class="conv-turn-time">' + time + '</span>';
     h += '<span class="conv-turn-model">' + (log.upstream_model || '') + '</span>';
-    h += '<span class="conv-turn-stats">' + fmtTokens(log.total_tokens || 0) + ' tokens | ' + (log.duration_ms || 0) + 'ms</span>';
+    h += '<span class="conv-turn-stats">上游 ' + fmtTokens(log.total_tokens || 0) + ' · 估 ' + fmtTokens(log.estimated_total_tokens || 0) + ' · ' + (log.duration_ms || 0) + 'ms</span>';
     h += '</div>';
     h += '<div class="conv-turn-content"><pre>' + escHtml(userMsg || '(empty)') + '</pre></div>';
     h += '<div class="conv-turn-header" style="margin-top:12px">';
@@ -1154,22 +1643,37 @@ async function openConversation(el, threadId) {
 }
 
 function fmtTokens(n) {
-  if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
-  if (n >= 1000) return (n/1000).toFixed(1) + 'k';
-  return String(n);
+  const value = Number(n) || 0;
+  const sign = value < 0 ? '-' : '';
+  const abs = Math.abs(value);
+  if (abs >= 1000000) return sign + (abs/1000000).toFixed(1) + 'M';
+  if (abs >= 1000) return sign + (abs/1000).toFixed(1) + 'k';
+  return sign + String(abs);
 }
 
 function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+function escapeHtml(value) {
+  return escHtml(String(value ?? ''));
+}
+
 
         // Init
-    loadProviders();
-    loadMode();
-    loadFallback();
-    loadVisionFallback();
-    loadLogs(false);
+    loadProviders().catch(err => console.error('loadProviders failed', err)).finally(() => {
+      loadMode();
+      loadFallback();
+      loadVisionFallback();
+      loadLogs(false);
+      loadTokenStats();
+    });
+    window.addEventListener('resize', function() {
+      clearTimeout(tokenChartResizeTimer);
+      tokenChartResizeTimer = setTimeout(function() {
+        if (latestTokenStats) drawTokenChart(latestTokenStats.points || []);
+      }, 150);
+    });
   </script>
 </body>
 </html>

@@ -1,11 +1,12 @@
 import { getSetting, setSetting } from "../../db/settings.js";
 import { encrypt, decrypt } from "../../util/crypto.js";
+import { recordLegacyKeySave } from "../../db/providerCredentials.js";
 
 const MASTER_KEY = process.env.ANYWAY2CODEX_MASTER_KEY || "default-dev-key-change-in-production";
 
 interface KeyEntry { providerId: string; hasKey: boolean; keyPrefix: string; updatedAt?: number; }
 
-export function handleKeyRoutes(action: string, _dataDir: string, body?: any): any {
+export function handleKeyRoutes(action: string, dataDir: string, body?: any): any {
   if (action === "list") {
     return ["openai", "mimo", "deepseek", "qwen", "zhipu", "kimi"].map((id) => {
       const stored = getSetting("key_" + id);
@@ -25,6 +26,7 @@ export function handleKeyRoutes(action: string, _dataDir: string, body?: any): a
     const enc = encrypt(apiKey, MASTER_KEY);
     setSetting("key_" + providerId, JSON.stringify({ ...enc, updatedAt: Date.now() }));
     setSetting("key_length_" + providerId, String(apiKey.length));
+    recordLegacyKeySave(dataDir, providerId, apiKey);
     return { success: true, message: "Key saved for " + providerId };
   }
   return { success: false, message: "unknown action" };

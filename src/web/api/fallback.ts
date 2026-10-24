@@ -1,4 +1,5 @@
 import { PROVIDERS } from "../../providers/registry.js";
+import { listProviderChoices } from "./providers.js";
 import { resolveFallbackSettings, saveFallbackSettings } from "../../fallbackSettings.js";
 import type { AppConfig } from "../../config.js";
 
@@ -9,18 +10,7 @@ export function getFallbackSettings(cfg: AppConfig) {
       providerId: cfg.fallbackProviderId,
       model: cfg.fallbackModel,
     }),
-    providers: Object.values(PROVIDERS).map((provider) => ({
-      id: provider.id,
-      displayName: provider.displayName,
-      defaultModel: provider.defaultModel,
-      models: provider.builtinModels
-        .filter((model) => !model.deprecatedAfter)
-        .map((model) => ({
-          id: model.id,
-          displayName: model.displayName || model.id,
-          supportsImages: model.supportsImages,
-        })),
-    })),
+    providers: listProviderChoices(cfg),
   };
 }
 

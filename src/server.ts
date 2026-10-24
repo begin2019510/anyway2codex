@@ -1,24 +1,28 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import type { ResponsesRequest, ChatRequest } from "./translate/types.js";
+import { timingSafeEqual } from "node:crypto";
+import type { ResponsesRequest, ChatRequest, AnthropicMessagesRequest } from "./translate/types.js";
 import { respToResponses } from "./translate/respToResponses.js";
 import { pipeChatStreamToResponses } from "./translate/streamToSse.js";
 import { iterChatStreamChunks } from "./upstream/chatStream.js";
-import { callOpenAICompat, callResponsesPassthrough, UpstreamError } from "./upstream/client.js";
+import { callAnthropicMessages, callOpenAICompat, callResponsesPassthrough, UpstreamError } from "./upstream/client.js";
 import { applyVisionFallback, selectProviderCandidates, type RouteCandidate } from "./router.js";
 import { shouldFallback, fallbackLogSnippet } from "./fallback.js";
 import { resolveFallbackSettings } from "./fallbackSettings.js";
 import { resolveRoutingSettings } from "./routingSettings.js";
 import { resolveVisionFallbackSettings } from "./visionFallbackSettings.js";
 import { chatRequestContainsImages, responsesRequestContainsImages } from "./translate/imageDetection.js";
-import { makeServerResponseSink } from "./util/sse.js";
+import { makeServerResponseSink, writeSseHeartbeat } from "./util/sse.js";
 import { log } from "./util/log.js";
+import { LOG_BODY_MAX_CHARS } from "./db/logs.js";
 import type { AppConfig } from "./config.js";
-import type { PreprocessCtx } from "./providers/types.js";
+import type { PreprocessCtx, Provider } from "./providers/types.js";
 import { PROVIDERS } from "./providers/registry.js";
+import { loadProviderRuntimes } from "./providerRuntime.js";
 import { handleWebRequest } from "./web/server.js";
-import { getApiKey } from "./web/api/keys.js";
 import { insertLog } from "./db/logs.js";
 import { maybeCompactChat, estimateTokens } from "./translate/autoCompact.js";
+import { ResponsesStreamTelemetry } from "./upstream/responsesStreamTelemetry.js";
+import { classifyStreamOutcome } from "./translate/streamOutcome.js";
 
 
 function extractThreadInfo(body: any)                                           {
@@ -71,9 +75,8 @@ function extractAssistantResponse(output: any[]): string {
       else if (item.summary) reasoningParts.push(item.summary.map((s: any) => s.text || "").join(""));
     }
   }
-  const toolCalls = output.filter((o: any) => o.type === "function_call").map((o: any) => "[tool:" + o.name + "]");
-  const allParts = [...reasoningParts, ...parts, ...toolCalls];
-  return allParts.join("\n").substring(0, 2000000);
+  const allParts = [...reasoningParts, ...parts];
+  return allParts.join("\n").substring(0, LOG_BODY_MAX_CHARS);
 }
 
 function sendJson(res: ServerResponse, status: number, data: unknown) {
@@ -107,32 +110,14 @@ function logAttemptFailure(
     stream: stream ? 1 : 0,
     error_code: code,
     error_snippet: fallbackLogSnippet(err, pending).substring(0, 2000),
-    request_body: JSON.stringify(body).substring(0, 2000000),
+    request_body: JSON.stringify(body).substring(0, LOG_BODY_MAX_CHARS),
+    ...extractThreadInfo(body),
   });
 }
 
 
 function loadApiKeys(cfg: AppConfig): Record<string, { baseUrl: string; apiKey: string }> {
-  const result: Record<string, { baseUrl: string; apiKey: string }> = {};
-  for (const p of Object.values(PROVIDERS)) {
-    const configured = cfg.providers[p.id];
-    let apiKey = configured?.apiKey || "";
-    if (!apiKey) {
-      for (const envKey of p.envKeys) {
-        const val = process.env[envKey];
-        if (val) { apiKey = val; break; }
-      }
-    }
-    if (!apiKey) apiKey = getApiKey(p.id) || "";
-    if (apiKey) {
-      const inferred = p.inferBaseUrlFromKey(apiKey);
-      result[p.id] = {
-        baseUrl: configured?.baseUrl || process.env[p.baseUrlEnv] || inferred || p.defaultBaseUrl,
-        apiKey,
-      };
-    }
-  }
-  return result;
+  return loadProviderRuntimes(cfg, PROVIDERS);
 }
 
 
@@ -251,7 +236,7 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
       res.setHeader("Cache-Control", "no-cache, no-transform");
       res.setHeader("Connection", "keep-alive");
       if (typeof res.flushHeaders === "function") res.flushHeaders();
-      keepalive = setInterval(() => { try { res.write(": keepalive\n\n"); } catch {} }, 15000);
+      keepalive = setInterval(() => writeSseHeartbeat(res), 15000);
       res.on("close", () => { if (keepalive) clearInterval(keepalive); });
     }
 
@@ -326,8 +311,8 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
           status_code: 200,
           duration_ms: Date.now() - startTime,
           stream: 0,
-          request_body: JSON.stringify(body).substring(0, 2000000),
-          response_body: JSON.stringify(json).substring(0, 2000000),
+          request_body: JSON.stringify(body).substring(0, LOG_BODY_MAX_CHARS),
+          response_body: JSON.stringify(json).substring(0, LOG_BODY_MAX_CHARS),
           ...extractThreadInfo(body),
         });
         sendJson(res, 200, json);
@@ -345,7 +330,7 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
           stream: 0,
           error_code: code,
           error_snippet: (err as Error).message?.substring(0, 2000),
-          request_body: JSON.stringify(body).substring(0, 2000000),
+          request_body: JSON.stringify(body).substring(0, LOG_BODY_MAX_CHARS),
           ...extractThreadInfo(body),
         });
         if (!res.headersSent) sendJson(res, status, errorEnvelope(status, code, (err as Error).message));
@@ -356,6 +341,7 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
     if (keepalive) clearInterval(keepalive);
     if (upstreamRes.body && typeof upstreamRes.body.getReader === "function") {
       const reader = upstreamRes.body.getReader();
+      const telemetry = new ResponsesStreamTelemetry();
       const bodyTimeoutAc = new AbortController();
       const bodyTimeoutId = setTimeout(() => bodyTimeoutAc.abort(), 120_000);
       const mergedSignal = AbortSignal.any([ac.signal, bodyTimeoutAc.signal]);
@@ -371,6 +357,7 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
           if (done) break;
           if (value && value.length > 0) {
             try { res.write(Buffer.from(value)); } catch {}
+            telemetry.feed(value);
           }
         }
       } catch (err) {
@@ -381,18 +368,32 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
         try { reader.cancel(); } catch {}
         try { res.end(); } catch {}
       }
+      const telemetryResult = telemetry.result();
+      const passthroughOutcome = streamError
+        ? classifyStreamOutcome(undefined, streamError)
+        : telemetryResult.status === "failed"
+          ? classifyStreamOutcome({ response: { status: "failed", error: telemetryResult.error } })
+          : telemetryResult.status && telemetryResult.status !== "completed"
+            ? classifyStreamOutcome({ response: { status: telemetryResult.status, error: telemetryResult.error } })
+            : classifyStreamOutcome({ response: { status: "completed" } });
       insertLog({
         ts: startTime,
         provider_id: route.provider.id,
         client_model: body.model,
         upstream_model: route.upstreamModel,
         endpoint: "/v1/responses",
-        status_code: streamError ? 500 : 200,
+        status_code: passthroughOutcome.statusCode,
         duration_ms: Date.now() - startTime,
         stream: 1,
-        request_body: JSON.stringify(body).substring(0, 2000000),
-        error_code: streamError ? "stream_error" : undefined,
-        error_snippet: streamError ? (streamError as Error).message?.substring(0, 2000) : undefined,
+        prompt_tokens: telemetryResult.usage.prompt_tokens ?? undefined,
+        completion_tokens: telemetryResult.usage.completion_tokens ?? undefined,
+        total_tokens: telemetryResult.usage.total_tokens ?? undefined,
+        cached_tokens: telemetryResult.usage.cached_tokens ?? undefined,
+        reasoning_tokens: telemetryResult.usage.reasoning_tokens ?? undefined,
+        estimated_completion_tokens: telemetryResult.estimated_completion_tokens,
+        request_body: JSON.stringify(body).substring(0, LOG_BODY_MAX_CHARS),
+        error_code: passthroughOutcome.errorCode,
+        error_snippet: passthroughOutcome.errorMessage?.substring(0, 2000),
         ...extractThreadInfo(body),
       });
     } else {
@@ -435,7 +436,7 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
   if (body.stream) {
     const sink = makeServerResponseSink(res);
     const KEEPALIVE_MS = 15000;
-    const keepalive = setInterval(() => sink.comment("keepalive"), KEEPALIVE_MS);
+    const keepalive = setInterval(() => sink.heartbeat(), KEEPALIVE_MS);
     res.on("close", () => clearInterval(keepalive));
 
     let upstreamRes: Response | undefined;
@@ -492,9 +493,19 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
 
     let streamError: any = null;
     let pipeResult: any;
+    const upstreamHeadersMs = Date.now() - startTime;
+    let firstUpstreamChunkMs: number | null = null;
+    let upstreamChunkCount = 0;
     try {
       const rawChunks = iterChatStreamChunks(upstreamRes, ac.signal);
-      pipeResult = await pipeChatStreamToResponses(sink, { chunks: rawChunks }, body, {
+      const instrumentedChunks = async function* () {
+        for await (const chunk of rawChunks) {
+          upstreamChunkCount += 1;
+          if (firstUpstreamChunkMs === null) firstUpstreamChunkMs = Date.now() - startTime;
+          yield chunk;
+        }
+      };
+      pipeResult = await pipeChatStreamToResponses(sink, { chunks: instrumentedChunks() }, body, {
         exposeReasoning: true,
         model: route.upstreamModel,
       });
@@ -521,25 +532,40 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
       clearInterval(keepalive);
       const userMsg2 = extractUserMessage(body.input);
       const u = pipeResult?.usage;
+      const outcome = classifyStreamOutcome(pipeResult, streamError);
+      if (outcome.statusCode >= 400) {
+        log.error("stream failed", {
+          status: outcome.statusCode,
+          code: outcome.errorCode,
+          message: outcome.errorMessage,
+          upstream_headers_ms: upstreamHeadersMs,
+          first_upstream_chunk_ms: firstUpstreamChunkMs,
+          upstream_chunks: upstreamChunkCount,
+          duration_ms: Date.now() - startTime,
+        });
+      }
+      const diagnostic = outcome.statusCode >= 400
+        ? `${outcome.errorMessage || "stream failed"} [headers_ms=${upstreamHeadersMs}; first_chunk_ms=${firstUpstreamChunkMs ?? "null"}; chunks=${upstreamChunkCount}; duration_ms=${Date.now() - startTime}]`
+        : undefined;
       insertLog({
         ts: startTime,
         provider_id: route.provider.id,
         client_model: body.model,
         upstream_model: route.upstreamModel,
         endpoint: "/v1/responses",
-        status_code: streamError ? 500 : 200,
+        status_code: outcome.statusCode,
         duration_ms: Date.now() - startTime,
         stream: 1,
         user_message: userMsg2,
-        assistant_response: streamError ? undefined : extractAssistantResponse((pipeResult?.response as any)?.output ?? []).substring(0, 2000000),
-        request_body: JSON.stringify(body).substring(0, 2000000),
-        response_body: streamError ? undefined : JSON.stringify(pipeResult?.response).substring(0, 2000000),
+        assistant_response: outcome.statusCode >= 400 ? undefined : extractAssistantResponse((pipeResult?.response as any)?.output ?? []).substring(0, LOG_BODY_MAX_CHARS),
+        request_body: JSON.stringify(body).substring(0, LOG_BODY_MAX_CHARS),
+        response_body: JSON.stringify(pipeResult?.response ?? null).substring(0, LOG_BODY_MAX_CHARS),
         prompt_tokens: u?.input_tokens ?? null,
         completion_tokens: u?.output_tokens ?? null,
         total_tokens: u?.total_tokens ?? null,
         tool_call_count: pipeResult?.toolCallCount ?? null,
-        error_code: streamError ? "stream_error" : undefined,
-        error_snippet: streamError ? (streamError as Error).message : undefined,
+        error_code: outcome.errorCode,
+        error_snippet: diagnostic?.substring(0, 2000),
         ...extractThreadInfo(body),
       });
     }
@@ -603,8 +629,8 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
       total_tokens: nonStreamJson?.usage?.total_tokens,
       user_message: userMsg,
       assistant_response: asstResp,
-      request_body: JSON.stringify(body).substring(0, 2000000),
-      response_body: JSON.stringify(nonStreamJson).substring(0, 2000000),
+      request_body: JSON.stringify(body).substring(0, LOG_BODY_MAX_CHARS),
+      response_body: JSON.stringify(nonStreamJson).substring(0, LOG_BODY_MAX_CHARS),
       ...extractThreadInfo(body),
     });
     sendJson(res, 200, translated);
@@ -621,7 +647,7 @@ async function handleResponses(cfg: AppConfig, req: IncomingMessage, res: Server
       stream: 0,
       error_code: "response_translation_error",
       error_snippet: (err as Error).message?.substring(0, 2000),
-      request_body: JSON.stringify(body).substring(0, 2000000),
+      request_body: JSON.stringify(body).substring(0, LOG_BODY_MAX_CHARS),
       ...extractThreadInfo(body),
     });
     if (!res.headersSent) sendJson(res, status, errorEnvelope(status, "response_translation_error", (err as Error).message));
@@ -788,7 +814,7 @@ async function handleChatPassthrough(cfg: AppConfig, req: IncomingMessage, res: 
           stream: 1,
           error_code: streamError ? "stream_error" : undefined,
           error_snippet: streamError ? (streamError as Error).message?.substring(0, 2000) : undefined,
-          request_body: JSON.stringify(body).substring(0, 2000000),
+          request_body: JSON.stringify(body).substring(0, LOG_BODY_MAX_CHARS),
           ...extractThreadInfo(body),
         });
       } else {
@@ -803,7 +829,7 @@ async function handleChatPassthrough(cfg: AppConfig, req: IncomingMessage, res: 
           status_code: 200,
           duration_ms: Date.now() - startTime,
           stream: 1,
-          request_body: JSON.stringify(body).substring(0, 2000000),
+          request_body: JSON.stringify(body).substring(0, LOG_BODY_MAX_CHARS),
           ...extractThreadInfo(body),
         });
       }
@@ -820,8 +846,8 @@ async function handleChatPassthrough(cfg: AppConfig, req: IncomingMessage, res: 
         status_code: 200,
         duration_ms: Date.now() - startTime,
         stream: 0,
-        request_body: JSON.stringify(body).substring(0, 2000000),
-        response_body: JSON.stringify(json).substring(0, 2000000),
+        request_body: JSON.stringify(body).substring(0, LOG_BODY_MAX_CHARS),
+        response_body: JSON.stringify(json).substring(0, LOG_BODY_MAX_CHARS),
         ...extractThreadInfo(body),
       });
     }
@@ -840,7 +866,7 @@ async function handleChatPassthrough(cfg: AppConfig, req: IncomingMessage, res: 
       stream: body.stream ? 1 : 0,
       error_code: err instanceof UpstreamError ? err.code : "internal_error",
       error_snippet: (err as Error).message?.substring(0, 2000),
-      request_body: JSON.stringify(body).substring(0, 2000000),
+      request_body: JSON.stringify(body).substring(0, LOG_BODY_MAX_CHARS),
       ...extractThreadInfo(body),
     });
     if (!res.headersSent) {
@@ -853,6 +879,290 @@ async function handleChatPassthrough(cfg: AppConfig, req: IncomingMessage, res: 
       try { res.end(); } catch {}
     }
   }
+}
+// ---------------------------------------------------------------------------
+// Anthropic Messages surface (POST /v1/messages) for Claude Code.
+//
+// Deliberately separate from the Codex routes above. This path matches the model id
+// the client asked for against providers exposing an Anthropic-native endpoint,
+// forwards that exact id, and never rewrites aliases or falls back to another
+// provider: the model you pick must be the model that actually runs. Upstream
+// failures come back in the error shape the Anthropic client already understands.
+// ---------------------------------------------------------------------------
+
+function anthropicError(status: number, message: string) {
+  const type = status === 429 ? "rate_limit_error"
+    : status === 401 ? "authentication_error"
+    : status === 403 ? "permission_denied"
+    : status >= 500 ? "api_error"
+    : "invalid_request_error";
+  return { type: "error", error: { type, message } };
+}
+
+interface AnthropicRoute {
+  provider: Provider;
+  baseUrl: string;
+  apiKey: string;
+}
+
+function describeAnthropicProviders(): string {
+  const parts: string[] = [];
+  for (const p of Object.values(PROVIDERS)) {
+    if (!p.supportsAnthropic) continue;
+    parts.push(p.id + "[" + (p.anthropicModelPrefixes ?? []).join("|") + "]");
+  }
+  return parts.length ? parts.join(", ") : "none";
+}
+
+function resolveAnthropicRoute(
+  model: string,
+  apiKeys: Record<string, { baseUrl: string; apiKey: string }>,
+): { route?: AnthropicRoute; error?: string } {
+  const name = model.toLowerCase();
+  let best: { provider: Provider; len: number } | undefined;
+  for (const provider of Object.values(PROVIDERS)) {
+    if (!provider.supportsAnthropic) continue;
+    for (const prefix of provider.anthropicModelPrefixes ?? []) {
+      if (!name.startsWith(prefix.toLowerCase())) continue;
+      if (!best || prefix.length > best.len) best = { provider, len: prefix.length };
+    }
+  }
+  if (!best) {
+    return {
+      error: "No Anthropic-capable upstream serves model " + model + ". Prefixes routed here: "
+        + describeAnthropicProviders() + ".",
+    };
+  }
+  const provider = best.provider;
+  const creds = apiKeys[provider.id];
+  if (!creds || !creds.apiKey) {
+    const envName = provider.envKeys[0] || provider.id.toUpperCase() + "_API_KEY";
+    return {
+      error: "Provider " + provider.id + " matched model " + model + " but has no API key. "
+        + "Set " + envName + " or save a key in the panel.",
+    };
+  }
+  const baseUrl = provider.resolveAnthropicBaseUrl?.(creds.apiKey, creds.baseUrl)
+    ?? provider.anthropicBaseUrl ?? "";
+  if (!baseUrl) {
+    return { error: "Provider " + provider.id + " has no Anthropic endpoint URL configured." };
+  }
+  return { route: { provider, baseUrl, apiKey: creds.apiKey } };
+}
+
+async function handleAnthropicMessages(
+  cfg: AppConfig,
+  req: IncomingMessage,
+  res: ServerResponse,
+  body: AnthropicMessagesRequest,
+) {
+  const model = typeof body.model === "string" ? body.model.trim() : "";
+  const startTime = Date.now();
+  const baseLog = {
+    ts: startTime,
+    client_model: model,
+    upstream_model: model,
+    endpoint: "/v1/messages",
+    request_body: JSON.stringify(body).substring(0, LOG_BODY_MAX_CHARS),
+    stream: body.stream === true ? 1 : 0,
+  };
+  if (!model) {
+    sendJson(res, 400, anthropicError(400, "Missing model in the request body."));
+    return;
+  }
+  const resolved = resolveAnthropicRoute(model, loadApiKeys(cfg));
+  if (!resolved.route) {
+    const message = resolved.error ?? "Unroutable model " + model;
+    insertLog({
+      ...baseLog,
+      provider_id: "",
+      status_code: 400,
+      duration_ms: Date.now() - startTime,
+      error_code: "invalid_model",
+      error_snippet: message.substring(0, 2000),
+    });
+    sendJson(res, 400, anthropicError(400, message));
+    return;
+  }
+  const active = resolved.route;
+  const ctx: PreprocessCtx = {
+    upstreamModel: model,
+    dataDir: cfg.dataDir,
+    disableThinking: cfg.disableThinking,
+    forceHighEffort: false,
+    webSearchEnabled: cfg.webSearch,
+    supportsImages: active.provider.resolveModel(model)?.supportsImages ?? true,
+  };
+  const processed = active.provider.preprocessMessages
+    ? active.provider.preprocessMessages(body, ctx)
+    : { body, removed: [] as string[] };
+  // Re-assert the id last: whatever preprocessing did, the model that runs is the
+  // model the client named.
+  const forwardBody: AnthropicMessagesRequest = { ...processed.body, model };
+  if (processed.removed.length) {
+    log.warn("anthropic: dropped content blocks for " + active.provider.id + ": " + processed.removed.join(", "));
+  }
+  const stream = forwardBody.stream === true;
+  const ac = new AbortController();
+  req.on("close", () => ac.abort());
+  const versionHeader = req.headers["anthropic-version"];
+  const betaHeader = req.headers["anthropic-beta"];
+  let keepalive: ReturnType<typeof setInterval> | null = null;
+
+  try {
+    const upstream = await callAnthropicMessages(
+      {
+        baseUrl: active.baseUrl,
+        apiKey: active.apiKey,
+        maxRetries: 3,
+        enhanceError: (errCtx) => active.provider.enhanceError(errCtx),
+        isTerminalError: (errCtx) => active.provider.isTerminalError?.(errCtx) === true,
+        extraHeaders: {
+          "anthropic-version": typeof versionHeader === "string" && versionHeader ? versionHeader : "2023-06-01",
+          "anthropic-beta": typeof betaHeader === "string" && betaHeader ? betaHeader : undefined,
+        },
+      },
+      forwardBody as Record<string, unknown>,
+      ac.signal,
+    );
+    const contentType = upstream.headers.get("content-type") || "";
+    if (stream && contentType.includes("text/event-stream")) {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+      });
+      if (typeof res.flushHeaders === "function") res.flushHeaders();
+      keepalive = setInterval(() => { try { res.write(": keepalive\n\n"); } catch {} }, 15000);
+      res.on("close", () => { if (keepalive) clearInterval(keepalive); });
+      const reader = upstream.body && typeof upstream.body.getReader === "function"
+        ? upstream.body.getReader()
+        : null;
+      const bodyTimeoutAc = new AbortController();
+      const bodyTimeoutId = setTimeout(() => bodyTimeoutAc.abort(), 600_000);
+      const mergedSignal = AbortSignal.any([ac.signal, bodyTimeoutAc.signal]);
+      let streamError: unknown = null;
+      if (reader) {
+        mergedSignal.addEventListener("abort", () => {
+          clearTimeout(bodyTimeoutId);
+          try { upstream.body?.cancel(); } catch {}
+          try { reader.cancel(); } catch {}
+        }, { once: true });
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            try { res.write(value); } catch {}
+          }
+        } catch (err) {
+          streamError = err;
+          try { log.error("anthropic stream error: " + (err as Error).message); } catch {}
+        }
+      }
+      clearTimeout(bodyTimeoutId);
+      if (keepalive) clearInterval(keepalive);
+      try { reader?.cancel(); } catch {}
+      try { res.end(); } catch {}
+      insertLog({
+        ...baseLog,
+        provider_id: active.provider.id,
+        status_code: streamError ? 500 : 200,
+        duration_ms: Date.now() - startTime,
+        error_code: streamError ? "stream_error" : undefined,
+        error_snippet: streamError ? String((streamError as Error).message ?? streamError).substring(0, 2000) : undefined,
+      });
+      return;
+    }
+    const json = await upstream.json() as Record<string, unknown>;
+    sendJson(res, 200, json);
+    insertLog({
+      ...baseLog,
+      provider_id: active.provider.id,
+      upstream_model: typeof json.model === "string" && json.model ? json.model : model,
+      status_code: 200,
+      duration_ms: Date.now() - startTime,
+      response_body: JSON.stringify(json).substring(0, LOG_BODY_MAX_CHARS),
+    });
+  } catch (err) {
+    if (keepalive) clearInterval(keepalive);
+    if (ac.signal.aborted) return;
+    const status = err instanceof UpstreamError ? err.status : 500;
+    const message = err instanceof UpstreamError ? err.message : String(err);
+    insertLog({
+      ...baseLog,
+      provider_id: active.provider.id,
+      status_code: status,
+      duration_ms: Date.now() - startTime,
+      error_code: err instanceof UpstreamError ? err.code : "internal_error",
+      error_snippet: message.substring(0, 2000),
+    });
+    if (!res.headersSent) {
+      sendJson(res, status, anthropicError(status, message));
+    } else {
+      try { res.write("event: error\ndata: " + JSON.stringify(anthropicError(status, message)) + "\n\n"); } catch {}
+      try { res.end(); } catch {}
+    }
+  }
+}
+
+// Claude Code calls /v1/messages/count_tokens before a turn to size its context bar.
+// These gateways expose that endpoint inconsistently and the number only drives a UI
+// estimate, so the proxy answers locally instead of adding a round trip that can 404.
+function handleAnthropicCountTokens(res: ServerResponse, raw: string) {
+  let tokens = 1;
+  try {
+    const body = JSON.parse(raw) as AnthropicMessagesRequest;
+    const chars = JSON.stringify(body.messages ?? []).length
+      + JSON.stringify(body.system ?? "").length
+      + JSON.stringify(body.tools ?? []).length;
+    tokens = Math.max(1, Math.round(chars / 4));
+  } catch {}
+  sendJson(res, 200, { input_tokens: tokens });
+}
+
+// ---------------------------------------------------------------------------
+// Client gate for the model endpoints.
+//
+// The upstream credentials live in this process only (/etc/anyway2codex/env), so a
+// caller never needs - and must never carry - a real provider key. What it presents
+// is a local token that means nothing outside this box. Left unset the gate stays
+// open, which is fine while the port is loopback-only but is logged at startup so it
+// is never an accident.
+// ---------------------------------------------------------------------------
+
+function clientPresentedToken(req: IncomingMessage): string {
+  const auth = req.headers["authorization"];
+  if (typeof auth === "string" && auth.toLowerCase().startsWith("bearer ")) return auth.slice(7).trim();
+  const apiKey = req.headers["x-api-key"];
+  if (typeof apiKey === "string") return apiKey.trim();
+  return "";
+}
+
+function isModelEndpoint(path: string): boolean {
+  return path === "/v1/messages"
+    || path.startsWith("/v1/messages/")
+    || path === "/v1/responses"
+    || path === "/v1/chat/completions";
+}
+
+// Returns a ready-to-send 401 body when the caller is not allowed, else null.
+function rejectUnauthenticated(req: IncomingMessage, path: string): unknown {
+  const expected = (process.env.ANYWAY2CODEX_CLIENT_TOKEN ?? "").trim();
+  if (!expected) return null;
+  const presented = clientPresentedToken(req);
+  const expectedBuf = Buffer.from(expected);
+  const presentedBuf = Buffer.from(presented);
+  const ok = presented.length > 0
+    && expectedBuf.length === presentedBuf.length
+    && timingSafeEqual(expectedBuf, presentedBuf);
+  if (ok) return null;
+  const anthropic = path === "/v1/messages" || path.startsWith("/v1/messages/");
+  const message = presented
+    ? "This gateway does not accept that credential. It holds the upstream keys itself; pass the value of ANYWAY2CODEX_CLIENT_TOKEN as Authorization: Bearer *** x-api-key."
+    : "Missing credentials for this gateway. Pass the value of ANYWAY2CODEX_CLIENT_TOKEN as Authorization: Bearer *** x-api-key.";
+  return anthropic
+    ? anthropicError(401, message)
+    : errorEnvelope(401, "authentication_error", message);
 }
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -888,6 +1198,12 @@ export function createServer_(cfg: AppConfig) {
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
     if (method === "OPTIONS") { res.writeHead(204); res.end(); return; }
 
+    // Model endpoints only: the panel and health stay reachable without a token.
+    if (isModelEndpoint(path)) {
+      const denied = rejectUnauthenticated(req, path);
+      if (denied) { sendJson(res, 401, denied); return; }
+    }
+
     if (method === "GET" && (path === "/health" || path === "/")) {
       sendJson(res, 200, { ok: true, version: "0.1.0" }); return;
     }
@@ -916,11 +1232,32 @@ export function createServer_(cfg: AppConfig) {
       })();
       return;
     }
+    if (method === "POST" && path === "/v1/messages/count_tokens") {
+      void (async () => {
+        try { handleAnthropicCountTokens(res, await readBody(req)); } catch {}
+      })();
+      return;
+    }
+    if (method === "POST" && path === "/v1/messages") {
+      void (async () => {
+        try {
+          const raw = await readBody(req);
+          const body = JSON.parse(raw) as AnthropicMessagesRequest;
+          await handleAnthropicMessages(cfg, req, res, body);
+        } catch (err) {
+          try { sendJson(res, 400, anthropicError(400, "Invalid JSON: " + (err instanceof Error ? err.message : String(err)))); } catch {}
+        }
+      })();
+      return;
+    }
     if (handleWebRequest(req, res, cfg.dataDir, cfg)) return;
     sendJson(res, 404, errorEnvelope(404, "not_found", "no route for " + method + " " + path));
   });
   server.listen(cfg.port, cfg.host);
   log.info("anyway2codex listening on http://" + cfg.host + ":" + cfg.port);
+  if (!(process.env.ANYWAY2CODEX_CLIENT_TOKEN ?? "").trim()) {
+    log.warn("client gate off: no ANYWAY2CODEX_CLIENT_TOKEN set, /v1 model endpoints accept any caller");
+  }
   const startupFallback = resolveFallbackSettings({ enabled: cfg.fallbackEnabled, providerId: cfg.fallbackProviderId, model: cfg.fallbackModel });
   if (startupFallback.enabled) {
     log.info("fallback enabled: " + startupFallback.providerId + ":" + startupFallback.model);

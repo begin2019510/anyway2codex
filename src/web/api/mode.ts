@@ -71,7 +71,7 @@ export function handleModeSwitch(body: any, dataDir: string, cfg: AppConfig) {
     );
   }
   if (action === "openai") {
-    return switchToOpenAIMode(modelId || "gpt-5.6-sol");
+    return switchToOpenAIMode(modelId || "gpt-6-luna");
   }
   return { success: false, message: "Unknown action: " + action };
 }

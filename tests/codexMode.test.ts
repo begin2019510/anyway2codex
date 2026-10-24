@@ -43,11 +43,11 @@ describe.sequential("Codex mode switching", () => {
   });
 
   it("switches to official OpenAI without changing auth.json", () => {
-    const result = switchToOpenAIMode("gpt-5.6-sol");
+    const result = switchToOpenAIMode("gpt-6-luna");
     expect(result.success).toBe(true);
     const config = readFileSync(join(codexHome, "config.toml"), "utf8");
     expect(config).toContain('model_provider = "openai"');
-    expect(config).toContain('model = "gpt-5.6-sol"');
+    expect(config).toContain('model = "gpt-6-luna"');
     expect(config).not.toContain("openai_base_url");
     expect(config).not.toContain("[model_providers.openai]");
     expect(readFileSync(join(codexHome, "auth.json"), "utf8")).toBe(authBefore);

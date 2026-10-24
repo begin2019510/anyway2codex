@@ -1,4 +1,4 @@
-import { queryLogs, getLogStats, getLogById, queryConversations, queryConversationLogs, getConversationCount } from "../../db/logs.js";
+import { queryLogs, getLogStats, getLogById, queryConversations, queryConversationLogs, getConversationCount, getTokenStats } from "../../db/logs.js";
 import type { ChatLog } from "../../db/logs.js";
 
 export function handleLogRoutes(params?: { limit?: number; offset?: number }) {
@@ -23,4 +23,10 @@ export function handleConversationDetail(threadId: string) {
   const logs = queryConversationLogs(threadId);
   if (!logs.length) return { error: "not found", thread_id: threadId };
   return { thread_id: threadId, logs };
+}
+
+export function handleTokenStats(range?: string, bucket?: string) {
+  const safeRange = ["24h", "7d", "30d", "all"].includes(range || "") ? range : "7d";
+  const safeBucket = bucket === "hour" ? "hour" : "day";
+  return getTokenStats(safeRange, safeBucket);
 }

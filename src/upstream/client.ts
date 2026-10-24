@@ -59,6 +59,14 @@ export interface UpstreamConfig {
   retryBaseMs?: number;
   userAgent?: string;
   enhanceError?: (ctx: { status: number; snippet?: string }) => { code: string; message: string } | null;
+  /**
+   * Reports a failure that no amount of retrying can fix (exhausted quota, unknown
+   * model id). Checked before the retry decision so the client fails fast instead of
+   * spending the whole backoff budget on a permanent error.
+   */
+  isTerminalError?: (ctx: { status: number; snippet?: string }) => boolean;
+  /** Protocol headers to attach, e.g. anthropic-version / anthropic-beta. */
+  extraHeaders?: Record<string, string | undefined>;
   contextOverflowMode?: string;
   modelInfo?: { id: string; contextWindow?: number };
 }
@@ -105,6 +113,24 @@ export async function callResponsesPassthrough(
   return await postUpstream(cfg, "/responses", sanitizePassthroughBody(body), signal);
 }
 
+/**
+ * Send an Anthropic Messages request upstream. cfg.baseUrl must already point at the
+ * Send an Anthropic Messages request upstream. cfg.baseUrl is the value a Claude client
+ * would put in ANTHROPIC_BASE_URL, so the request goes to that base plus /v1/messages -
+ * verified against the Qwen and the MiMo gateways, where base plus /messages alone
+ * answers 404. A base already ending in /v1 is accepted too. The body is forwarded
+ * exactly as the caller built it: nothing is rewritten here, because whatever the
+ * client asked for has to be whatever the upstream answers.
+ */
+export async function callAnthropicMessages(
+  cfg: UpstreamConfig,
+  body: Record<string, unknown>,
+  signal: AbortSignal,
+): Promise<Response> {
+  const base = cfg.baseUrl.replace(/\/+$/, "").replace(/\/v1$/i, "");
+  return await postUpstream({ ...cfg, baseUrl: base }, "/v1/messages", body, signal);
+}
+
 async function postUpstream(
   cfg: UpstreamConfig,
   path: string,
@@ -118,6 +144,9 @@ async function postUpstream(
     "Accept": "text/event-stream, application/json",
   };
   if (cfg.userAgent) headers["User-Agent"] = cfg.userAgent;
+  for (const [name, value] of Object.entries(cfg.extraHeaders ?? {})) {
+    if (value) headers[name] = value;
+  }
 
   const maxRetries = cfg.maxRetries ?? 6;
   const baseMs = cfg.retryBaseMs ?? 500;
@@ -161,8 +190,11 @@ async function postUpstream(
     clearTimeout(timeoutId);
     if (res.ok) return res;
 
-    if (RETRYABLE_STATUSES.has(res.status) && attempt < maxRetries) {
-      const snippet = await readSnippet(res);
+    // Read the body once: it is needed both for the retry decision and for the
+    // surfaced error, and a Response body can only be consumed one time.
+    const snippet = await readSnippet(res);
+    const terminal = cfg.isTerminalError?.({ status: res.status, snippet }) === true;
+    if (!terminal && RETRYABLE_STATUSES.has(res.status) && attempt < maxRetries) {
       const delay = retryDelayMs(res, attempt, baseMs);
       log.warn("upstream " + res.status + ", retry " + (attempt + 1) + "/" + maxRetries + " in " + delay + "ms");
       await abortableSleep(delay, signal);
@@ -170,10 +202,12 @@ async function postUpstream(
       continue;
     }
 
-    const snippet = await readSnippet(res);
     const enhanced = cfg.enhanceError?.({ status: res.status, snippet });
     const code = enhanced?.code ?? defaultErrorCode(res.status);
-    const message = enhanced?.message ?? "upstream returned " + res.status + ": " + (snippet ?? "(no body)");
+    const base = enhanced?.message ?? "upstream returned " + res.status + ": " + (snippet ?? "(no body)");
+    const message = terminal
+      ? base + (enhanced ? "" : " (not retried: this failure is terminal)")
+      : base;
     throw new UpstreamError({ status: res.status, code, message, bodySnippet: snippet });
   }
 }

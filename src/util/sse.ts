@@ -3,8 +3,18 @@ import type { ServerResponse } from "node:http";
 export interface Sink {
   write(event: string, data: unknown): void;
   comment(text: string): void;
+  heartbeat(): void;
   end(): void;
   closed(): boolean;
+}
+
+export function writeSseHeartbeat(res: ServerResponse): void {
+  if (res.writableEnded) return;
+  try {
+    // Codex ignores response.in_progress, but its parser still yields the
+    // event and resets the client's SSE idle timer.
+    res.write('event: response.in_progress\ndata: {"type":"response.in_progress"}\n\n');
+  } catch {}
 }
 
 export function makeServerResponseSink(res: ServerResponse): Sink {
@@ -27,6 +37,10 @@ export function makeServerResponseSink(res: ServerResponse): Sink {
       if (isClosed) return;
       res.write(": " + text + "\n\n");
     },
+    heartbeat() {
+      if (isClosed) return;
+      writeSseHeartbeat(res);
+    },
     end() {
       if (isClosed) return;
       isClosed = true;
@@ -43,6 +57,7 @@ export function makeMemorySink(): Sink & { events: { event: string; data: unknow
     events,
     write(event: string, data: unknown) { if (!isClosed) events.push({ event, data }); },
     comment(_text: string) {},
+    heartbeat() {},
     end() { isClosed = true; },
     closed() { return isClosed; },
   };

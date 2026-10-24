@@ -16,7 +16,12 @@ function serveStatic(res: ServerResponse, filePath: string) {
     html: "text/html; charset=utf-8", js: "application/javascript; charset=utf-8",
     css: "text/css; charset=utf-8", json: "application/json",
   };
-  res.writeHead(200, { "Content-Type": types[ext] || "application/octet-stream" });
+  res.writeHead(200, {
+    "Content-Type": types[ext] || "application/octet-stream",
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+  });
   res.end(readFileSync(filePath, "utf-8"));
 }
 

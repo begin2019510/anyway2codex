@@ -71,7 +71,7 @@ export function switchToDomesticMode(
 }
 
 export function switchToOpenAIMode(
-  modelId: string = "gpt-5.6-sol",
+  modelId: string = "gpt-6-luna",
 ): SwitchResult {
   const previousOwner = detectAuthJsonOwner();
   const oauth = getOAuthStatus();
