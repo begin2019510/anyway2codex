@@ -1,7 +1,7 @@
 {
   "name": "anyway2codex",
   "version": "0.1.0",
-  "description": "Universal Codex model proxy",
+  "description": "Universal local proxy for OpenAI Codex: Responses API <-> Chat Completions, multi-provider routing, fallback, vision fallback, and an admin panel.",
   "type": "module",
   "bin": {
     "anyway2codex": "dist/cli.js"
@@ -20,6 +20,7 @@
   "dependencies": {
     "better-sqlite3": "^12.9.0",
     "eventsource-parser": "^3.0.0",
+    "mimo2codex": "0.5.29",
     "nanoid": "^5.0.7",
     "undici": "^6.19.0"
   },
@@ -30,5 +31,28 @@
     "typescript": "^5.4.0",
     "vitest": "^1.4.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "openai-codex",
+    "llm-proxy",
+    "responses-api",
+    "chat-completions",
+    "deepseek",
+    "qwen",
+    "mimo",
+    "kimi",
+    "glm",
+    "claude-code",
+    "anthropic",
+    "model-router"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/begin2019510/anyway2codex.git"
+  },
+  "homepage": "https://github.com/begin2019510/anyway2codex#readme",
+  "bugs": {
+    "url": "https://github.com/begin2019510/anyway2codex/issues"
+  }
 }

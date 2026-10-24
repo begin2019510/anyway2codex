@@ -1,6 +1,18 @@
 const fs = require("fs");
-const src = "C:/Program Files/mimo2codex/resources/sidecar/dist";
-const dst = "D:/anyway2codex/dist";
+const path = require("path");
+const root = __dirname;
+const dst = path.join(root, "dist");
+const candidates = [
+  process.env.MIMO2CODEX_DIST,
+  path.join(root, "node_modules", "mimo2codex", "dist"),
+  "C:/Program Files/mimo2codex/resources/sidecar/dist",
+].filter(Boolean);
+const src = candidates.find((dir) => fs.existsSync(path.join(dir, "translate", "streamToSse.js")));
+if (!src) {
+  console.error("mimo2codex sidecar not found. Run `npm install` (pinned mimo2codex 0.5.29) or set MIMO2CODEX_DIST.");
+  process.exit(1);
+}
+console.log("Using mimo2codex sidecar:", src);
 const files = [
   ["translate/streamToSse.js", "translate/streamToSse.js"],
   ["translate/reqToChat.js", "translate/reqToChat.js"],
@@ -169,5 +181,5 @@ console.log("Patched reqToChat.js upstream model");
 
 console.log("Postbuild complete");
 // Copy frontend
-try { fs.copyFileSync("D:/anyway2codex/src/web/frontend/index.html", dst + "/web/frontend/index.html"); console.log("Copied frontend"); }
+try { fs.copyFileSync(path.join(root, "src/web/frontend/index.html"), path.join(dst, "web/frontend/index.html")); console.log("Copied frontend"); }
 catch (e) { console.error("Failed frontend:", e.message); }

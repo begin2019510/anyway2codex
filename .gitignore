@@ -44,3 +44,6 @@ patch_server.js
 .tmp/
 *.bak
 *.bak-*
+
+# commit the lockfile for reproducible installs
+!package-lock.json
